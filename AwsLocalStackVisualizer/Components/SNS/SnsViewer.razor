@@ -1,0 +1,766 @@
+@page "/sns"
+@page "/sns/{TopicArn?}"
+@using AwsLocalStackVisualizer.Services
+@using AwsLocalStackVisualizer.Models
+@inject ILocalStackService LocalStackService
+@inject IJSRuntime JSRuntime
+@rendermode InteractiveServer
+
+<PageTitle>SNS Viewer - LocalStack Visualizer</PageTitle>
+
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1 class="display-5">
+                        <i class="bi bi-megaphone text-warning"></i>
+                        SNS Viewer
+                    </h1>
+                    @if (!string.IsNullOrEmpty(TopicArn))
+                    {
+                        <nav aria-label="breadcrumb">
+                            <ol class="breadcrumb">
+                                <li class="breadcrumb-item">
+                                    <a href="/sns" class="text-decoration-none">Tópicos</a>
+                                </li>
+                                <li class="breadcrumb-item active" aria-current="page">@GetTopicName(TopicArn)</li>
+                            </ol>
+                        </nav>
+                    }
+                </div>
+                <div class="btn-group">
+                    @if (string.IsNullOrEmpty(TopicArn))
+                    {
+                        <button class="btn btn-success" @onclick="ShowCreateTopicModal">
+                            <i class="bi bi-plus-circle"></i> Criar Tópico
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-success" @onclick="() => ShowPublishMessageModal()">
+                            <i class="bi bi-megaphone"></i> Publicar Mensagem
+                        </button>
+                        <button class="btn btn-info" @onclick="() => ShowCreateSubscriptionModal()">
+                            <i class="bi bi-person-plus"></i> Nova Assinatura
+                        </button>
+                    }
+                    <button class="btn btn-outline-primary" @onclick="RefreshData">
+                        <i class="bi bi-arrow-clockwise"></i> Atualizar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="row">
+            <div class="col-12 text-center">
+                <div class="spinner-border text-warning" role="status">
+                    <span class="visually-hidden">Carregando...</span>
+                </div>
+                <p class="mt-2">Carregando dados do SNS...</p>
+            </div>
+        </div>
+    }
+    else if (hasError)
+    {
+        <div class="row">
+            <div class="col-12">
+                <div class="alert alert-danger" role="alert">
+                    <h4 class="alert-heading">Erro ao carregar dados</h4>
+                    <p>Não foi possível conectar ao serviço SNS do LocalStack.</p>
+                    <button class="btn btn-outline-danger" @onclick="RefreshData">
+                        <i class="bi bi-arrow-clockwise"></i> Tentar Novamente
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+    else if (string.IsNullOrEmpty(TopicArn))
+    {
+        <!-- Lista de Tópicos -->
+        <div class="row">
+            <div class="col-12">
+                <h3>Tópicos Disponíveis</h3>
+                @if (topics.Any())
+                {
+                    <div class="row">
+                        @foreach (var topic in topics)
+                        {
+                            <div class="col-lg-4 col-md-6 mb-4">
+                                <div class="card h-100">
+                                    <div class="card-body">
+                                        <h5 class="card-title">
+                                            <i class="bi bi-broadcast text-warning"></i>
+                                            @topic.Name
+                                        </h5>
+                                        <div class="row text-center mb-3">
+                                            <div class="col-12">
+                                                <h6 class="text-primary mb-0">@topic.SubscriptionsCount</h6>
+                                                <small class="text-muted">Assinaturas</small>
+                                            </div>
+                                        </div>
+                                        <hr>
+                                        <div class="mb-2">
+                                            <small class="text-muted">
+                                                <strong>ARN:</strong>
+                                            </small>
+                                            <br>
+                                            <code class="small">@topic.Arn</code>
+                                        </div>
+                                        <small class="text-muted">
+                                            Criado em: @topic.CreatedDate.ToString("dd/MM/yyyy HH:mm")
+                                        </small>
+                                    </div>
+                                    <div class="card-footer">
+                                        <div class="d-grid gap-2">
+                                            <button class="btn btn-warning btn-sm" 
+                                                    @onclick="() => NavigateToTopic(topic.Arn)">
+                                                <i class="bi bi-eye"></i> Visualizar Assinaturas
+                                            </button>
+                                            <div class="btn-group">
+                                                <button class="btn btn-outline-success btn-sm" 
+                                                        @onclick="() => ShowPublishMessageModal(topic.Arn, topic.Name)">
+                                                    <i class="bi bi-megaphone"></i> Publicar
+                                                </button>
+                                                <button class="btn btn-outline-info btn-sm" 
+                                                        @onclick="() => ShowCreateSubscriptionModal(topic.Arn, topic.Name)">
+                                                    <i class="bi bi-person-plus"></i> Assinar
+                                                </button>
+                                                <button class="btn btn-outline-danger btn-sm" 
+                                                        @onclick="() => ShowDeleteTopicModal(topic.Arn, topic.Name)">
+                                                    <i class="bi bi-trash"></i> Excluir
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="alert alert-info" role="alert">
+                        <h4 class="alert-heading">Nenhum tópico encontrado</h4>
+                        <p>Não há tópicos SNS criados no LocalStack.</p>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+    else
+    {
+        <!-- Detalhes do Tópico -->
+        @if (topicDetails != null)
+        {
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title">
+                                <i class="bi bi-broadcast text-warning"></i>
+                                @topicDetails.TopicInfo.Name
+                            </h5>
+                            <div class="row mb-3">
+                                <div class="col-md-4">
+                                    <strong>Assinaturas:</strong> 
+                                    <span class="badge bg-primary">@topicDetails.TopicInfo.SubscriptionsCount</span>
+                                </div>
+                                <div class="col-md-8">
+                                    <strong>Criado em:</strong> @topicDetails.TopicInfo.CreatedDate.ToString("dd/MM/yyyy HH:mm:ss")
+                                </div>
+                            </div>
+                            <div class="mb-2">
+                                <strong>ARN do Tópico:</strong>
+                                <br>
+                                <code>@topicDetails.TopicInfo.Arn</code>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-12">
+                    <h4>Assinaturas do Tópico</h4>
+                    @if (topicDetails.Subscriptions.Any())
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Protocolo</th>
+                                        <th>Endpoint</th>
+                                        <th>Status</th>
+                                        <th>Proprietário</th>
+                                        <th>ARN da Assinatura</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var subscription in topicDetails.Subscriptions)
+                                    {
+                                        <tr>
+                                            <td>
+                                                <span class="badge @GetProtocolBadgeClass(subscription.Protocol)">
+                                                    <i class="@GetProtocolIcon(subscription.Protocol)"></i>
+                                                    @subscription.Protocol.ToUpper()
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <code class="small">@subscription.Endpoint</code>
+                                            </td>
+                                            <td>
+                                                @if (subscription.ConfirmationWasAuthenticated)
+                                                {
+                                                    <span class="badge bg-success">
+                                                        <i class="bi bi-check-circle"></i> Confirmada
+                                                    </span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge bg-warning">
+                                                        <i class="bi bi-clock"></i> Pendente
+                                                    </span>
+                                                }
+                                            </td>
+                                            <td>@subscription.Owner</td>
+                                            <td>
+                                                @if (!string.IsNullOrEmpty(subscription.SubscriptionArn) && 
+                                                     subscription.SubscriptionArn != "PendingConfirmation")
+                                                {
+                                                    <code class="small">@subscription.SubscriptionArn</code>
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted">Pendente de confirmação</span>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="mt-4">
+                            <h5>Estatísticas das Assinaturas</h5>
+                            <div class="row">
+                                @{
+                                    var groupedSubscriptions = topicDetails.Subscriptions
+                                        .GroupBy(s => s.Protocol)
+                                        .ToDictionary(g => g.Key, g => g.Count());
+                                    
+                                    var confirmedCount = topicDetails.Subscriptions.Count(s => s.ConfirmationWasAuthenticated);
+                                    var pendingCount = topicDetails.Subscriptions.Count(s => !s.ConfirmationWasAuthenticated);
+                                }
+                                
+                                <div class="col-md-3 mb-3">
+                                    <div class="card text-center">
+                                        <div class="card-body">
+                                            <h5 class="text-success">@confirmedCount</h5>
+                                            <small class="text-muted">Confirmadas</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3 mb-3">
+                                    <div class="card text-center">
+                                        <div class="card-body">
+                                            <h5 class="text-warning">@pendingCount</h5>
+                                            <small class="text-muted">Pendentes</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                @foreach (var protocolGroup in groupedSubscriptions)
+                                {
+                                    <div class="col-md-3 mb-3">
+                                        <div class="card text-center">
+                                            <div class="card-body">
+                                                <h5 class="text-primary">@protocolGroup.Value</h5>
+                                                <small class="text-muted">@protocolGroup.Key.ToUpper()</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="alert alert-info" role="alert">
+                            <h4 class="alert-heading">Nenhuma assinatura encontrada</h4>
+                            <p>Este tópico não possui assinaturas configuradas.</p>
+                            <small class="text-muted">
+                                Assinaturas podem ser criadas através do AWS CLI ou SDKs.
+                            </small>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    }
+</div>
+
+<!-- Create Topic Modal -->
+@if (showCreateTopicModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Criar Novo Tópico SNS</h5>
+                    <button type="button" class="btn-close" @onclick="HideCreateTopicModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="topicName" class="form-label">Nome do Tópico</label>
+                        <input type="text" class="form-control" id="topicName" @bind="newTopicName" placeholder="Digite o nome do tópico">
+                        <div class="form-text">O nome deve ser único e seguir as regras de nomenclatura do SNS.</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="HideCreateTopicModal">Cancelar</button>
+                    <button type="button" class="btn btn-success" @onclick="CreateTopic" disabled="@(isCreatingTopic || string.IsNullOrWhiteSpace(newTopicName))">
+                        @if (isCreatingTopic)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        Criar Tópico
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Publish Message Modal -->
+@if (showPublishMessageModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Publicar Mensagem no Tópico</h5>
+                    <button type="button" class="btn-close" @onclick="HidePublishMessageModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="publishSubject" class="form-label">Assunto (Opcional)</label>
+                        <input type="text" class="form-control" id="publishSubject" @bind="publishSubject" placeholder="Assunto da mensagem">
+                    </div>
+                    <div class="mb-3">
+                        <label for="publishMessage" class="form-label">Mensagem</label>
+                        <textarea class="form-control" id="publishMessage" rows="8" @bind="publishMessage" placeholder="Digite a mensagem a ser publicada..."></textarea>
+                        <div class="form-text">A mensagem será enviada para todos os assinantes do tópico.</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="HidePublishMessageModal">Cancelar</button>
+                    <button type="button" class="btn btn-success" @onclick="PublishMessage" disabled="@(isPublishingMessage || string.IsNullOrWhiteSpace(publishMessage))">
+                        @if (isPublishingMessage)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        Publicar Mensagem
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Create Subscription Modal -->
+@if (showCreateSubscriptionModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Criar Nova Assinatura</h5>
+                    <button type="button" class="btn-close" @onclick="HideCreateSubscriptionModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="subscriptionProtocol" class="form-label">Protocolo</label>
+                        <select class="form-select" id="subscriptionProtocol" @bind="subscriptionProtocol">
+                            <option value="email">Email</option>
+                            <option value="email-json">Email (JSON)</option>
+                            <option value="sms">SMS</option>
+                            <option value="sqs">SQS</option>
+                            <option value="http">HTTP</option>
+                            <option value="https">HTTPS</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="subscriptionEndpoint" class="form-label">Endpoint</label>
+                        <input type="text" class="form-control" id="subscriptionEndpoint" @bind="subscriptionEndpoint" 
+                               placeholder="@GetEndpointPlaceholder(subscriptionProtocol)">
+                        <div class="form-text">@GetEndpointHelp(subscriptionProtocol)</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="HideCreateSubscriptionModal">Cancelar</button>
+                    <button type="button" class="btn btn-info" @onclick="CreateSubscription" disabled="@(isCreatingSubscription || string.IsNullOrWhiteSpace(subscriptionEndpoint))">
+                        @if (isCreatingSubscription)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        Criar Assinatura
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal de confirmação de exclusão de tópico -->
+@if (showDeleteTopicModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Confirmar Exclusão do Tópico</h5>
+                    <button type="button" class="btn-close" @onclick="HideDeleteTopicModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Tem certeza que deseja excluir o tópico <strong>@topicNameToDelete</strong>?</p>
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        <strong>Atenção:</strong> Esta ação não pode ser desfeita e todas as assinaturas serão removidas!
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="HideDeleteTopicModal">Cancelar</button>
+                    <button type="button" class="btn btn-danger" @onclick="DeleteTopic" disabled="@isDeletingTopic">
+                        @if (isDeletingTopic)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        Excluir Tópico
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string? TopicArn { get; set; }
+
+    private List<SnsTopicInfo> topics = new();
+    private SnsTopicDetails? topicDetails;
+    private bool isLoading = true;
+    private bool hasError = false;
+    
+    // Create topic modal
+    private bool showCreateTopicModal = false;
+    private string newTopicName = string.Empty;
+    private bool isCreatingTopic = false;
+    
+    // Publish message modal
+    private bool showPublishMessageModal = false;
+    private string publishMessage = string.Empty;
+    private string publishSubject = string.Empty;
+    private bool isPublishingMessage = false;
+    
+    // Create subscription modal
+    private bool showCreateSubscriptionModal = false;
+    private string subscriptionProtocol = "email";
+    private string subscriptionEndpoint = string.Empty;
+    private bool isCreatingSubscription = false;
+    
+    // Delete Topic modal
+    private bool showDeleteTopicModal = false;
+    private string topicToDelete = string.Empty;
+    private string topicNameToDelete = string.Empty;
+    private bool isDeletingTopic = false;
+    
+    // Selected topic for operations
+    private string selectedTopicArn = string.Empty;
+    private string selectedTopicName = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        isLoading = true;
+        hasError = false;
+        StateHasChanged();
+
+        try
+        {
+            if (string.IsNullOrEmpty(TopicArn))
+            {
+                var result = await LocalStackService.GetSnsTopicsAsync();
+                topics = result.IsSuccess && result.Data != null ? result.Data.ToList() : new List<SnsTopicInfo>();
+                topicDetails = null;
+            }
+            else
+            {
+                var result = await LocalStackService.GetSnsTopicDetailsAsync(TopicArn);
+                topicDetails = result.IsSuccess ? result.Data : null;
+                topics.Clear();
+            }
+        }
+        catch (Exception)
+        {
+            hasError = true;
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RefreshData()
+    {
+        await LoadData();
+    }
+
+    private async Task NavigateToTopic(string topicArn)
+    {
+        var encodedArn = System.Web.HttpUtility.UrlEncode(topicArn);
+        await JSRuntime.InvokeVoidAsync("window.location.href", $"/sns/{encodedArn}");
+    }
+
+    private string GetTopicName(string topicArn)
+    {
+        return topicArn.Split(':').LastOrDefault() ?? topicArn;
+    }
+
+    private string GetProtocolBadgeClass(string protocol)
+    {
+        return protocol.ToLower() switch
+        {
+            "email" => "bg-primary",
+            "email-json" => "bg-info",
+            "sms" => "bg-success",
+            "sqs" => "bg-warning",
+            "http" => "bg-secondary",
+            "https" => "bg-dark",
+            "lambda" => "bg-danger",
+            _ => "bg-light text-dark"
+        };
+    }
+
+    private string GetProtocolIcon(string protocol)
+    {
+        return protocol.ToLower() switch
+        {
+            "email" or "email-json" => "bi bi-envelope",
+            "sms" => "bi bi-phone",
+            "sqs" => "bi bi-list-ul",
+            "http" or "https" => "bi bi-globe",
+            "lambda" => "bi bi-lightning",
+            _ => "bi bi-question-circle"
+        };
+    }
+
+    // Create Topic Modal Methods
+    private void ShowCreateTopicModal()
+    {
+        newTopicName = string.Empty;
+        showCreateTopicModal = true;
+    }
+
+    private void HideCreateTopicModal()
+    {
+        showCreateTopicModal = false;
+        newTopicName = string.Empty;
+    }
+
+    private async Task CreateTopic()
+    {
+        if (string.IsNullOrWhiteSpace(newTopicName))
+            return;
+
+        isCreatingTopic = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await LocalStackService.CreateSnsTopicAsync(newTopicName);
+            if (result.IsSuccess)
+            {
+                HideCreateTopicModal();
+                await LoadData();
+            }
+        }
+        finally
+        {
+            isCreatingTopic = false;
+            StateHasChanged();
+        }
+    }
+
+    // Publish Message Modal Methods
+    private void ShowPublishMessageModal(string topicArn = "", string topicName = "")
+    {
+        publishMessage = string.Empty;
+        publishSubject = string.Empty;
+        showPublishMessageModal = true;
+        
+        // Se chamado da lista de tópicos, armazenar informações do tópico
+        if (!string.IsNullOrEmpty(topicArn) && !string.IsNullOrEmpty(topicName))
+        {
+            selectedTopicArn = topicArn;
+            selectedTopicName = topicName;
+        }
+    }
+
+    private void HidePublishMessageModal()
+    {
+        showPublishMessageModal = false;
+        publishMessage = string.Empty;
+        publishSubject = string.Empty;
+    }
+
+    private async Task PublishMessage()
+    {
+        if (string.IsNullOrWhiteSpace(publishMessage) || string.IsNullOrEmpty(TopicArn))
+            return;
+
+        isPublishingMessage = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await LocalStackService.PublishSnsMessageAsync(TopicArn, publishMessage, publishSubject);
+            if (result.IsSuccess)
+            {
+                HidePublishMessageModal();
+                await LoadData();
+            }
+        }
+        finally
+        {
+            isPublishingMessage = false;
+            StateHasChanged();
+        }
+    }
+
+    // Create Subscription Modal Methods
+    private void ShowCreateSubscriptionModal(string topicArn = "", string topicName = "")
+    {
+        subscriptionProtocol = "email";
+        subscriptionEndpoint = string.Empty;
+        showCreateSubscriptionModal = true;
+        
+        // Se chamado da lista de tópicos, armazenar informações do tópico
+        if (!string.IsNullOrEmpty(topicArn) && !string.IsNullOrEmpty(topicName))
+        {
+            selectedTopicArn = topicArn;
+            selectedTopicName = topicName;
+        }
+    }
+
+    private void HideCreateSubscriptionModal()
+    {
+        showCreateSubscriptionModal = false;
+        subscriptionProtocol = "email";
+        subscriptionEndpoint = string.Empty;
+    }
+
+    private async Task CreateSubscription()
+    {
+        if (string.IsNullOrWhiteSpace(subscriptionEndpoint) || string.IsNullOrEmpty(TopicArn))
+            return;
+
+        isCreatingSubscription = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await LocalStackService.SubscribeSnsAsync(TopicArn, subscriptionProtocol, subscriptionEndpoint);
+            if (result.IsSuccess)
+            {
+                HideCreateSubscriptionModal();
+                await LoadData();
+            }
+        }
+        finally
+        {
+            isCreatingSubscription = false;
+            StateHasChanged();
+        }
+    }
+
+    private string GetEndpointPlaceholder(string protocol)
+    {
+        return protocol switch
+        {
+            "email" or "email-json" => "usuario@exemplo.com",
+            "sms" => "+5511999999999",
+            "sqs" => "arn:aws:sqs:us-west-2:000000000000:nome-da-fila",
+            "http" => "http://exemplo.com/webhook",
+            "https" => "https://exemplo.com/webhook",
+            _ => "Digite o endpoint"
+        };
+    }
+
+    private string GetEndpointHelp(string protocol)
+    {
+        return protocol switch
+        {
+            "email" => "Digite um endereço de email válido",
+            "email-json" => "Digite um endereço de email válido (receberá mensagens em formato JSON)",
+            "sms" => "Digite um número de telefone no formato internacional (+55...)",
+            "sqs" => "Digite o ARN completo da fila SQS",
+            "http" or "https" => "Digite a URL completa do webhook",
+            _ => "Digite o endpoint apropriado para o protocolo selecionado"
+        };
+    }
+
+    // Delete Topic Methods
+    private void ShowDeleteTopicModal(string topicArn, string topicName)
+    {
+        topicToDelete = topicArn;
+        topicNameToDelete = topicName;
+        showDeleteTopicModal = true;
+    }
+
+    private void HideDeleteTopicModal()
+    {
+        showDeleteTopicModal = false;
+        topicToDelete = string.Empty;
+        topicNameToDelete = string.Empty;
+    }
+
+    private async Task DeleteTopic()
+    {
+        if (string.IsNullOrEmpty(topicToDelete))
+            return;
+
+        isDeletingTopic = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await LocalStackService.DeleteSnsTopicAsync(topicToDelete);
+            if (result.IsSuccess)
+            {
+                HideDeleteTopicModal();
+                await LoadData();
+            }
+        }
+        finally
+        {
+            isDeletingTopic = false;
+            StateHasChanged();
+        }
+    }
+}
+
+

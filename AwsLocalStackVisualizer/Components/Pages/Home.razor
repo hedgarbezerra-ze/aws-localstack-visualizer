@@ -1,0 +1,50 @@
+﻿@page "/"
+
+<PageTitle>LocalStack Visualizer</PageTitle>
+
+<div class="container-fluid">
+    <div class="row justify-content-center">
+        <div class="col-md-8 text-center">
+            <h1 class="display-3 mb-4">LocalStack Visualizer</h1>
+            <p class="lead mb-4">
+                Visualize e gerencie seus recursos AWS LocalStack de forma simples e intuitiva.
+            </p>
+            
+            <div class="row mb-5">
+                <div class="col-md-4 mb-3">
+                    <div class="card h-100">
+                        <div class="card-body">
+                            <i class="bi bi-cloud-upload fs-1 text-primary mb-3"></i>
+                            <h5 class="card-title">Amazon S3</h5>
+                            <p class="card-text">Gerencie buckets e objetos S3</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <div class="card h-100">
+                        <div class="card-body">
+                            <i class="bi bi-list-ul fs-1 text-success mb-3"></i>
+                            <h5 class="card-title">Amazon SQS</h5>
+                            <p class="card-text">Visualize filas e mensagens</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <div class="card h-100">
+                        <div class="card-body">
+                            <i class="bi bi-megaphone fs-1 text-warning mb-3"></i>
+                            <h5 class="card-title">Amazon SNS</h5>
+                            <p class="card-text">Monitore tópicos e assinaturas</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="d-grid gap-2 d-md-block">
+                <a href="/dashboard" class="btn btn-primary btn-lg">
+                    <i class="bi bi-speedometer2"></i> Acessar Dashboard
+                </a>
+            </div>
+        </div>
+    </div>
+</div>

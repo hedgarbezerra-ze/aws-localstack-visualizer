@@ -1,0 +1,701 @@
+@page "/s3"
+@page "/s3/{BucketName?}"
+@using AwsLocalStackVisualizer.Services
+@using AwsLocalStackVisualizer.Models
+@inject ILocalStackService LocalStackService
+@inject IJSRuntime JSRuntime
+@rendermode InteractiveServer
+
+<PageTitle>S3 Browser - LocalStack Visualizer</PageTitle>
+
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1 class="display-5">
+                        <i class="bi bi-cloud-upload text-primary"></i>
+                        S3 Browser
+                    </h1>
+                    @if (!string.IsNullOrEmpty(BucketName))
+                    {
+                        <nav aria-label="breadcrumb">
+                            <ol class="breadcrumb">
+                                <li class="breadcrumb-item">
+                                    <a href="/s3" class="text-decoration-none">Buckets</a>
+                                </li>
+                                <li class="breadcrumb-item active" aria-current="page">@BucketName</li>
+                            </ol>
+                        </nav>
+                    }
+                </div>
+                <div class="btn-group">
+                    @if (string.IsNullOrEmpty(BucketName))
+                    {
+                        <button class="btn btn-success" @onclick="ShowCreateBucketModal">
+                            <i class="bi bi-plus-circle"></i> Criar Bucket
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-success" @onclick="ShowUploadObjectModal">
+                            <i class="bi bi-upload"></i> Enviar Arquivo
+                        </button>
+                    }
+                    <button class="btn btn-outline-primary" @onclick="RefreshData">
+                        <i class="bi bi-arrow-clockwise"></i> Atualizar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="row">
+            <div class="col-12 text-center">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Carregando...</span>
+                </div>
+                <p class="mt-2">Carregando dados do S3...</p>
+            </div>
+        </div>
+    }
+    else if (hasError)
+    {
+        <div class="row">
+            <div class="col-12">
+                <div class="alert alert-danger" role="alert">
+                    <h4 class="alert-heading">Erro ao carregar dados</h4>
+                    <p>Não foi possível conectar ao serviço S3 do LocalStack.</p>
+                    <button class="btn btn-outline-danger" @onclick="RefreshData">
+                        <i class="bi bi-arrow-clockwise"></i> Tentar Novamente
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+    else if (string.IsNullOrEmpty(BucketName))
+    {
+        <!-- Lista de Buckets -->
+        <div class="row">
+            <div class="col-12">
+                <h3>Buckets Disponíveis</h3>
+                @if (buckets.Any())
+                {
+                    <div class="row">
+                        @foreach (var bucket in buckets)
+                        {
+                            <div class="col-lg-4 col-md-6 mb-4">
+                                <div class="card h-100">
+                                    <div class="card-body">
+                                        <h5 class="card-title">
+                                            <i class="bi bi-bucket text-primary"></i>
+                                            @bucket.Name
+                                        </h5>
+                                        <div class="row text-center">
+                                            <div class="col-6">
+                                                <h6 class="text-primary mb-0">@bucket.ObjectCount</h6>
+                                                <small class="text-muted">Objetos</small>
+                                            </div>
+                                            <div class="col-6">
+                                                <h6 class="text-success mb-0">@FormatBytes(bucket.TotalSize)</h6>
+                                                <small class="text-muted">Tamanho</small>
+                                            </div>
+                                        </div>
+                                        <hr>
+                                        <small class="text-muted">
+                                            Criado em: @bucket.CreationDate.ToString("dd/MM/yyyy HH:mm")
+                                        </small>
+                                    </div>
+                                    <div class="card-footer">
+                                        <div class="btn-group w-100">
+                                            <button class="btn btn-primary btn-sm" 
+                                                    @onclick="() => NavigateToBucket(bucket.Name)">
+                                                <i class="bi bi-eye"></i> Visualizar
+                                            </button>
+                                            <button class="btn btn-outline-danger btn-sm" 
+                                                    @onclick="() => ShowDeleteBucketModal(bucket.Name)">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="alert alert-info" role="alert">
+                        <h4 class="alert-heading">Nenhum bucket encontrado</h4>
+                        <p>Não há buckets S3 criados no LocalStack.</p>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+    else
+    {
+        <!-- Detalhes do Bucket -->
+        @if (bucketDetails != null)
+        {
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title">
+                                <i class="bi bi-bucket text-primary"></i>
+                                @bucketDetails.BucketInfo.Name
+                            </h5>
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <strong>Objetos:</strong> @bucketDetails.BucketInfo.ObjectCount
+                                </div>
+                                <div class="col-md-3">
+                                    <strong>Tamanho Total:</strong> @FormatBytes(bucketDetails.BucketInfo.TotalSize)
+                                </div>
+                                <div class="col-md-6">
+                                    <strong>Criado em:</strong> @bucketDetails.BucketInfo.CreationDate.ToString("dd/MM/yyyy HH:mm:ss")
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-12">
+                    <h4>Objetos no Bucket</h4>
+                    @if (bucketDetails.Objects.Any())
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Nome</th>
+                                        <th>Tamanho</th>
+                                        <th>Última Modificação</th>
+                                        <th>Classe de Armazenamento</th>
+                                        <th>Ações</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var obj in bucketDetails.Objects)
+                                    {
+                                        <tr>
+                                            <td>
+                                                <i class="@GetFileIcon(obj.Key) text-muted"></i>
+                                                @obj.Key
+                                            </td>
+                                            <td>@FormatBytes(obj.Size)</td>
+                                            <td>@obj.LastModified.ToString("dd/MM/yyyy HH:mm:ss")</td>
+                                            <td>
+                                                <span class="badge bg-secondary">@obj.StorageClass</span>
+                                            </td>
+                                            <td>
+                                                <div class="btn-group">
+                                                    <button class="btn btn-sm btn-outline-primary" 
+                                                            @onclick="() => ViewObjectContent(obj.Key)">
+                                                        <i class="bi bi-eye"></i> Ver
+                                                    </button>
+                                                    <button class="btn btn-sm btn-outline-danger" 
+                                                            @onclick="() => ShowDeleteObjectModal(obj.Key)">
+                                                        <i class="bi bi-trash"></i>
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="alert alert-info" role="alert">
+                            <h4 class="alert-heading">Bucket vazio</h4>
+                            <p>Este bucket não contém nenhum objeto.</p>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    }
+</div>
+
+<!-- Modal para visualizar conteúdo do objeto -->
+<div class="modal fade" id="objectContentModal" tabindex="-1" aria-labelledby="objectContentModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="objectContentModalLabel">
+                    <i class="bi bi-file-text"></i> @selectedObjectKey
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                @if (isLoadingContent)
+                {
+                    <div class="text-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Carregando conteúdo...</span>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <pre class="bg-light p-3 rounded" style="max-height: 400px; overflow-y: auto;">@objectContent</pre>
+                }
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Create Bucket Modal -->
+@if (showCreateBucketModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Criar Novo Bucket</h5>
+                    <button type="button" class="btn-close" @onclick="HideCreateBucketModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="bucketName" class="form-label">Nome do Bucket</label>
+                        <input type="text" class="form-control" id="bucketName" @bind="newBucketName" placeholder="Digite o nome do bucket">
+                        <div class="form-text">O nome deve ser único e seguir as regras de nomenclatura do S3.</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="HideCreateBucketModal">Cancelar</button>
+                    <button type="button" class="btn btn-success" @onclick="CreateBucket" disabled="@(isCreatingBucket || string.IsNullOrWhiteSpace(newBucketName))">
+                        @if (isCreatingBucket)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        Criar Bucket
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Upload Object Modal -->
+@if (showUploadObjectModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Enviar Arquivo para @BucketName</h5>
+                    <button type="button" class="btn-close" @onclick="HideUploadObjectModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="objectKey" class="form-label">Nome do Arquivo</label>
+                        <input type="text" class="form-control" id="objectKey" @bind="newObjectKey" placeholder="exemplo.txt">
+                    </div>
+                    <div class="mb-3">
+                        <label for="contentType" class="form-label">Tipo de Conteúdo</label>
+                        <select class="form-select" id="contentType" @bind="newObjectContentType">
+                            <option value="text/plain">Texto (text/plain)</option>
+                            <option value="application/json">JSON (application/json)</option>
+                            <option value="text/html">HTML (text/html)</option>
+                            <option value="text/css">CSS (text/css)</option>
+                            <option value="application/javascript">JavaScript (application/javascript)</option>
+                            <option value="application/xml">XML (application/xml)</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="objectContent" class="form-label">Conteúdo</label>
+                        <textarea class="form-control" id="objectContent" rows="10" @bind="newObjectContent" placeholder="Digite o conteúdo do arquivo..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="HideUploadObjectModal">Cancelar</button>
+                    <button type="button" class="btn btn-success" @onclick="UploadObject" disabled="@(isUploadingObject || string.IsNullOrWhiteSpace(newObjectKey))">
+                        @if (isUploadingObject)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        Enviar Arquivo
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal de confirmação de exclusão de bucket -->
+@if (showDeleteBucketModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Confirmar Exclusão do Bucket</h5>
+                    <button type="button" class="btn-close" @onclick="HideDeleteBucketModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Tem certeza que deseja excluir o bucket <strong>@bucketToDelete</strong>?</p>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" @bind="forceDeleteBucket" id="forceDeleteBucket">
+                        <label class="form-check-label" for="forceDeleteBucket">
+                            Forçar exclusão (remover todos os objetos primeiro)
+                        </label>
+                    </div>
+                    <div class="alert alert-warning mt-2">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        Esta ação não pode ser desfeita!
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="HideDeleteBucketModal">Cancelar</button>
+                    <button type="button" class="btn btn-danger" @onclick="DeleteBucket" disabled="@isDeletingBucket">
+                        @if (isDeletingBucket)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        Excluir Bucket
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal de confirmação de exclusão de objeto -->
+@if (showDeleteObjectModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Confirmar Exclusão do Objeto</h5>
+                    <button type="button" class="btn-close" @onclick="HideDeleteObjectModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Tem certeza que deseja excluir o objeto <strong>@objectToDelete</strong>?</p>
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        Esta ação não pode ser desfeita!
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="HideDeleteObjectModal">Cancelar</button>
+                    <button type="button" class="btn btn-danger" @onclick="DeleteObject" disabled="@isDeletingObject">
+                        @if (isDeletingObject)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        Excluir Objeto
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string? BucketName { get; set; }
+
+    private List<S3BucketInfo> buckets = new();
+    private S3BucketDetails? bucketDetails;
+    private bool isLoading = true;
+    private bool hasError = false;
+    private bool isLoadingContent = false;
+    private string objectContent = string.Empty;
+    private string selectedObjectKey = string.Empty;
+    
+    // Create bucket modal
+    private bool showCreateBucketModal = false;
+    private string newBucketName = string.Empty;
+    private bool isCreatingBucket = false;
+    
+    // Upload object modal
+    private bool showUploadObjectModal = false;
+    private string newObjectKey = string.Empty;
+    private string newObjectContent = string.Empty;
+    private string newObjectContentType = "text/plain";
+    private bool isUploadingObject = false;
+    
+    // Delete modals
+    private bool showDeleteBucketModal = false;
+    private bool showDeleteObjectModal = false;
+    private string bucketToDelete = string.Empty;
+    private string objectToDelete = string.Empty;
+    private bool isDeletingBucket = false;
+    private bool isDeletingObject = false;
+    private bool forceDeleteBucket = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        isLoading = true;
+        hasError = false;
+        StateHasChanged();
+
+        try
+        {
+            if (string.IsNullOrEmpty(BucketName))
+            {
+                var result = await LocalStackService.GetS3BucketsAsync();
+                buckets = result.IsSuccess && result.Data != null ? result.Data.ToList() : new List<S3BucketInfo>();
+                bucketDetails = null;
+            }
+            else
+            {
+                var result = await LocalStackService.GetS3BucketDetailsAsync(BucketName);
+                bucketDetails = result.IsSuccess ? result.Data : null;
+                buckets.Clear();
+            }
+        }
+        catch (Exception)
+        {
+            hasError = true;
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RefreshData()
+    {
+        await LoadData();
+    }
+
+    private async Task NavigateToBucket(string bucketName)
+    {
+        await JSRuntime.InvokeVoidAsync("window.location.href", $"/s3/{bucketName}");
+    }
+
+    private async Task ViewObjectContent(string objectKey)
+    {
+        selectedObjectKey = objectKey;
+        isLoadingContent = true;
+        objectContent = string.Empty;
+
+        await JSRuntime.InvokeVoidAsync("eval", @"
+            const modal = new bootstrap.Modal(document.getElementById('objectContentModal'));
+            modal.show();
+        ");
+
+        try
+        {
+            var result = await LocalStackService.GetS3ObjectContentAsync(BucketName!, objectKey);
+            objectContent = result.IsSuccess && result.Data != null ? result.Data : (result.ErrorMessage ?? "Erro ao carregar conteúdo");
+        }
+        catch (Exception ex)
+        {
+            objectContent = $"Erro ao carregar conteúdo: {ex.Message}";
+        }
+        finally
+        {
+            isLoadingContent = false;
+            StateHasChanged();
+        }
+    }
+
+    private string FormatBytes(long bytes)
+    {
+        if (bytes == 0) return "0 B";
+        
+        string[] suffixes = { "B", "KB", "MB", "GB", "TB" };
+        int suffixIndex = 0;
+        double size = bytes;
+        
+        while (size >= 1024 && suffixIndex < suffixes.Length - 1)
+        {
+            size /= 1024;
+            suffixIndex++;
+        }
+        
+        return $"{size:F2} {suffixes[suffixIndex]}";
+    }
+
+    private string GetFileIcon(string fileName)
+    {
+        var extension = Path.GetExtension(fileName).ToLower();
+        return extension switch
+        {
+            ".txt" or ".log" => "bi bi-file-text",
+            ".json" => "bi bi-file-code",
+            ".xml" => "bi bi-file-code",
+            ".csv" => "bi bi-file-spreadsheet",
+            ".jpg" or ".jpeg" or ".png" or ".gif" => "bi bi-file-image",
+            ".pdf" => "bi bi-file-pdf",
+            ".zip" or ".rar" or ".7z" => "bi bi-file-zip",
+            _ => "bi bi-file"
+        };
+    }
+
+    private void ShowCreateBucketModal()
+    {
+        newBucketName = string.Empty;
+        showCreateBucketModal = true;
+    }
+
+    private void HideCreateBucketModal()
+    {
+        showCreateBucketModal = false;
+        newBucketName = string.Empty;
+    }
+
+    private async Task CreateBucket()
+    {
+        if (string.IsNullOrWhiteSpace(newBucketName))
+            return;
+
+        isCreatingBucket = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await LocalStackService.CreateS3BucketAsync(newBucketName);
+            if (result.IsSuccess)
+            {
+                HideCreateBucketModal();
+                await LoadData();
+            }
+        }
+        finally
+        {
+            isCreatingBucket = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ShowUploadObjectModal()
+    {
+        newObjectKey = string.Empty;
+        newObjectContent = string.Empty;
+        newObjectContentType = "text/plain";
+        showUploadObjectModal = true;
+    }
+
+    private void HideUploadObjectModal()
+    {
+        showUploadObjectModal = false;
+        newObjectKey = string.Empty;
+        newObjectContent = string.Empty;
+        newObjectContentType = "text/plain";
+    }
+
+    private async Task UploadObject()
+    {
+        if (string.IsNullOrWhiteSpace(newObjectKey) || string.IsNullOrWhiteSpace(BucketName))
+            return;
+
+        isUploadingObject = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await LocalStackService.UploadS3ObjectAsync(BucketName, newObjectKey, newObjectContent, newObjectContentType);
+            if (result.IsSuccess)
+            {
+                HideUploadObjectModal();
+                await LoadData();
+            }
+        }
+        finally
+        {
+            isUploadingObject = false;
+            StateHasChanged();
+        }
+    }
+
+    // Delete Bucket Methods
+    private void ShowDeleteBucketModal(string bucketName)
+    {
+        bucketToDelete = bucketName;
+        forceDeleteBucket = false;
+        showDeleteBucketModal = true;
+    }
+
+    private void HideDeleteBucketModal()
+    {
+        showDeleteBucketModal = false;
+        bucketToDelete = string.Empty;
+        forceDeleteBucket = false;
+    }
+
+    private async Task DeleteBucket()
+    {
+        if (string.IsNullOrWhiteSpace(bucketToDelete))
+            return;
+
+        isDeletingBucket = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await LocalStackService.DeleteS3BucketAsync(bucketToDelete, forceDeleteBucket);
+            if (result.IsSuccess)
+            {
+                HideDeleteBucketModal();
+                await LoadData();
+            }
+        }
+        finally
+        {
+            isDeletingBucket = false;
+            StateHasChanged();
+        }
+    }
+
+    // Delete Object Methods
+    private void ShowDeleteObjectModal(string objectKey)
+    {
+        objectToDelete = objectKey;
+        showDeleteObjectModal = true;
+    }
+
+    private void HideDeleteObjectModal()
+    {
+        showDeleteObjectModal = false;
+        objectToDelete = string.Empty;
+    }
+
+    private async Task DeleteObject()
+    {
+        if (string.IsNullOrWhiteSpace(objectToDelete) || string.IsNullOrWhiteSpace(BucketName))
+            return;
+
+        isDeletingObject = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await LocalStackService.DeleteS3ObjectAsync(BucketName, objectToDelete);
+            if (result.IsSuccess)
+            {
+                HideDeleteObjectModal();
+                await LoadData();
+            }
+        }
+        finally
+        {
+            isDeletingObject = false;
+            StateHasChanged();
+        }
+    }
+}

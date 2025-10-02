@@ -1,0 +1,840 @@
+@page "/sqs"
+@page "/sqs/{QueueName?}"
+@using AwsLocalStackVisualizer.Services
+@using AwsLocalStackVisualizer.Models
+@inject ILocalStackService LocalStackService
+@inject IJSRuntime JSRuntime
+@rendermode InteractiveServer
+
+<PageTitle>SQS Manager - LocalStack Visualizer</PageTitle>
+
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1 class="display-5">
+                        <i class="bi bi-list-ul text-success"></i>
+                        SQS Manager
+                    </h1>
+                    @if (!string.IsNullOrEmpty(QueueName))
+                    {
+                        <nav aria-label="breadcrumb">
+                            <ol class="breadcrumb">
+                                <li class="breadcrumb-item">
+                                    <a href="/sqs" class="text-decoration-none">Filas</a>
+                                </li>
+                                <li class="breadcrumb-item active" aria-current="page">@QueueName</li>
+                            </ol>
+                        </nav>
+                    }
+                </div>
+                <div class="btn-group">
+                    @if (string.IsNullOrEmpty(QueueName))
+                    {
+                        <button class="btn btn-success" @onclick="ShowCreateQueueModal">
+                            <i class="bi bi-plus-circle"></i> Criar Fila
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-success" @onclick="() => ShowSendMessageModal()">
+                            <i class="bi bi-send"></i> Enviar Mensagem
+                        </button>
+                        <button class="btn btn-info" @onclick="() => ShowSubscribeToSnsModal()">
+                            <i class="bi bi-link"></i> Associar ao SNS
+                        </button>
+                    }
+                    <button class="btn btn-outline-primary" @onclick="RefreshData">
+                        <i class="bi bi-arrow-clockwise"></i> Atualizar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="row">
+            <div class="col-12 text-center">
+                <div class="spinner-border text-success" role="status">
+                    <span class="visually-hidden">Carregando...</span>
+                </div>
+                <p class="mt-2">Carregando dados do SQS...</p>
+            </div>
+        </div>
+    }
+    else if (hasError)
+    {
+        <div class="row">
+            <div class="col-12">
+                <div class="alert alert-danger" role="alert">
+                    <h4 class="alert-heading">Erro ao carregar dados</h4>
+                    <p>Não foi possível conectar ao serviço SQS do LocalStack.</p>
+                    <button class="btn btn-outline-danger" @onclick="RefreshData">
+                        <i class="bi bi-arrow-clockwise"></i> Tentar Novamente
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+    else if (string.IsNullOrEmpty(QueueName))
+    {
+        <!-- Lista de Filas -->
+        <div class="row">
+            <div class="col-12">
+                <h3>Filas Disponíveis</h3>
+                @if (queues.Any())
+                {
+                    <div class="row">
+                        @foreach (var queue in queues)
+                        {
+                            <div class="col-lg-4 col-md-6 mb-4">
+                                <div class="card h-100">
+                                    <div class="card-body">
+                                        <h5 class="card-title">
+                                            <i class="bi bi-inbox text-success"></i>
+                                            @queue.Name
+                                        </h5>
+                                        <div class="row text-center mb-3">
+                                            <div class="col-6">
+                                                <h6 class="text-primary mb-0">@queue.ApproximateNumberOfMessages</h6>
+                                                <small class="text-muted">Mensagens</small>
+                                            </div>
+                                            <div class="col-6">
+                                                <h6 class="text-warning mb-0">@queue.ApproximateNumberOfMessagesNotVisible</h6>
+                                                <small class="text-muted">Em Processamento</small>
+                                            </div>
+                                        </div>
+                                        <hr>
+                                        <small class="text-muted">
+                                            Criada em: @queue.CreatedTimestamp.ToString("dd/MM/yyyy HH:mm")
+                                        </small>
+                                    </div>
+                                    <div class="card-footer">
+                                        <div class="d-grid gap-2">
+                                            <button class="btn btn-success btn-sm" 
+                                                    @onclick="() => NavigateToQueue(queue.Name)">
+                                                <i class="bi bi-eye"></i> Visualizar Mensagens
+                                            </button>
+                                            <div class="btn-group">
+                                                <button class="btn btn-outline-info btn-sm" 
+                                                        @onclick="() => ShowSendMessageModal(queue.Url, queue.Name)">
+                                                    <i class="bi bi-envelope"></i> Enviar
+                                                </button>
+                                                <button class="btn btn-outline-warning btn-sm" 
+                                                        @onclick="() => ShowSubscribeToSnsModal(queue.Url, queue.Name)">
+                                                    <i class="bi bi-link"></i> SNS
+                                                </button>
+                                                <button class="btn btn-outline-secondary btn-sm" 
+                                                        @onclick="() => ShowPurgeQueueModal(queue.Url, queue.Name)">
+                                                    <i class="bi bi-trash3"></i> Limpar
+                                                </button>
+                                                <button class="btn btn-outline-danger btn-sm" 
+                                                        @onclick="() => ShowDeleteQueueModal(queue.Url, queue.Name)">
+                                                    <i class="bi bi-trash"></i> Excluir
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="alert alert-info" role="alert">
+                        <h4 class="alert-heading">Nenhuma fila encontrada</h4>
+                        <p>Não há filas SQS criadas no LocalStack.</p>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+    else
+    {
+        <!-- Detalhes da Fila -->
+        @if (queueDetails != null)
+        {
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title">
+                                <i class="bi bi-inbox text-success"></i>
+                                @queueDetails.QueueInfo.Name
+                            </h5>
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <strong>Mensagens:</strong> 
+                                    <span class="badge bg-primary">@queueDetails.QueueInfo.ApproximateNumberOfMessages</span>
+                                </div>
+                                <div class="col-md-3">
+                                    <strong>Em Processamento:</strong> 
+                                    <span class="badge bg-warning">@queueDetails.QueueInfo.ApproximateNumberOfMessagesNotVisible</span>
+                                </div>
+                                <div class="col-md-6">
+                                    <strong>Criada em:</strong> @queueDetails.QueueInfo.CreatedTimestamp.ToString("dd/MM/yyyy HH:mm:ss")
+                                </div>
+                            </div>
+                            <hr>
+                            <small class="text-muted">
+                                <strong>URL:</strong> @queueDetails.QueueInfo.Url
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-12">
+                    <h4>Mensagens na Fila</h4>
+                    @if (queueDetails.Messages.Any())
+                    {
+                        <div class="alert alert-warning" role="alert">
+                            <i class="bi bi-exclamation-triangle"></i>
+                            <strong>Atenção:</strong> As mensagens listadas foram temporariamente recebidas para visualização. 
+                            Elas retornarão à fila automaticamente após o timeout de visibilidade.
+                        </div>
+
+                        @foreach (var message in queueDetails.Messages)
+                        {
+                            <div class="card mb-3">
+                                <div class="card-header">
+                                    <div class="row align-items-center">
+                                        <div class="col-md-8">
+                                            <h6 class="mb-0">
+                                                <i class="bi bi-envelope"></i>
+                                                Mensagem: @message.MessageId[..8]...
+                                            </h6>
+                                        </div>
+                                        <div class="col-md-4 text-end">
+                                            <small class="text-muted">
+                                                @message.SentTimestamp.ToString("dd/MM/yyyy HH:mm:ss")
+                                            </small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row mb-3">
+                                        <div class="col-md-6">
+                                            <strong>Recebida:</strong> @message.ReceiveCount vez(es)
+                                        </div>
+                                        <div class="col-md-6">
+                                            <strong>Receipt Handle:</strong> 
+                                            <code class="small">@message.ReceiptHandle[..20]...</code>
+                                        </div>
+                                    </div>
+                                    
+                                    <h6>Conteúdo da Mensagem:</h6>
+                                    <div class="bg-light p-3 rounded">
+                                        <pre class="mb-0" style="white-space: pre-wrap; word-break: break-word;">@FormatMessageBody(message.Body)</pre>
+                                    </div>
+
+                                    @if (message.Attributes.Any())
+                                    {
+                                        <h6 class="mt-3">Atributos:</h6>
+                                        <div class="table-responsive">
+                                            <table class="table table-sm">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Atributo</th>
+                                                        <th>Valor</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    @foreach (var attr in message.Attributes.Where(a => !IsSystemAttribute(a.Key)))
+                                                    {
+                                                        <tr>
+                                                            <td><code>@attr.Key</code></td>
+                                                            <td>@attr.Value</td>
+                                                        </tr>
+                                                    }
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <div class="alert alert-info" role="alert">
+                            <h4 class="alert-heading">Nenhuma mensagem disponível</h4>
+                            <p>Esta fila não contém mensagens visíveis no momento.</p>
+                            <small class="text-muted">
+                                Mensagens podem estar sendo processadas ou a fila pode estar vazia.
+                            </small>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    }
+</div>
+
+<!-- Create Queue Modal -->
+@if (showCreateQueueModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Criar Nova Fila SQS</h5>
+                    <button type="button" class="btn-close" @onclick="HideCreateQueueModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="queueName" class="form-label">Nome da Fila</label>
+                        <input type="text" class="form-control" id="queueName" @bind="newQueueName" placeholder="Digite o nome da fila">
+                        <div class="form-text">O nome deve ser único e seguir as regras de nomenclatura do SQS.</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="HideCreateQueueModal">Cancelar</button>
+                    <button type="button" class="btn btn-success" @onclick="CreateQueue" disabled="@(isCreatingQueue || string.IsNullOrWhiteSpace(newQueueName))">
+                        @if (isCreatingQueue)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        Criar Fila
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Send Message Modal -->
+@if (showSendMessageModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Enviar Mensagem para @QueueName</h5>
+                    <button type="button" class="btn-close" @onclick="HideSendMessageModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="messageSubject" class="form-label">Assunto (Opcional)</label>
+                        <input type="text" class="form-control" id="messageSubject" @bind="messageSubject" placeholder="Assunto da mensagem">
+                    </div>
+                    <div class="mb-3">
+                        <label for="messageBody" class="form-label">Corpo da Mensagem</label>
+                        <textarea class="form-control" id="messageBody" rows="8" @bind="messageBody" placeholder="Digite o conteúdo da mensagem..."></textarea>
+                        <div class="form-text">Você pode enviar texto simples ou JSON.</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="HideSendMessageModal">Cancelar</button>
+                    <button type="button" class="btn btn-success" @onclick="SendMessage" disabled="@(isSendingMessage || string.IsNullOrWhiteSpace(messageBody))">
+                        @if (isSendingMessage)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        Enviar Mensagem
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Subscribe to SNS Modal -->
+@if (showSubscribeToSnsModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Associar Fila ao Tópico SNS</h5>
+                    <button type="button" class="btn-close" @onclick="HideSubscribeToSnsModal"></button>
+                </div>
+                <div class="modal-body">
+                    @if (isLoadingTopics)
+                    {
+                        <div class="text-center">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Carregando tópicos...</span>
+                            </div>
+                            <p class="mt-2">Carregando tópicos SNS disponíveis...</p>
+                        </div>
+                    }
+                    else if (availableTopics.Any())
+                    {
+                        <div class="mb-3">
+                            <label for="topicSelect" class="form-label">Selecione o Tópico SNS</label>
+                            <select class="form-select" id="topicSelect" @bind="selectedTopicArn">
+                                <option value="">-- Selecione um tópico --</option>
+                                @foreach (var topic in availableTopics)
+                                {
+                                    <option value="@topic.Arn">@topic.Name</option>
+                                }
+                            </select>
+                            <div class="form-text">A fila @QueueName receberá mensagens publicadas no tópico selecionado.</div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="alert alert-warning">
+                            <h6>Nenhum tópico SNS encontrado</h6>
+                            <p class="mb-0">Crie um tópico SNS primeiro para poder associar esta fila.</p>
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="HideSubscribeToSnsModal">Cancelar</button>
+                    <button type="button" class="btn btn-info" @onclick="SubscribeToSnsTopic" 
+                            disabled="@(isSubscribing || string.IsNullOrWhiteSpace(selectedTopicArn) || !availableTopics.Any())">
+                        @if (isSubscribing)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        Associar ao SNS
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal de confirmação de exclusão de fila -->
+@if (showDeleteQueueModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Confirmar Exclusão da Fila</h5>
+                    <button type="button" class="btn-close" @onclick="HideDeleteQueueModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Tem certeza que deseja excluir a fila <strong>@queueNameToDelete</strong>?</p>
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        <strong>Atenção:</strong> Esta ação não pode ser desfeita e todas as mensagens serão perdidas!
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="HideDeleteQueueModal">Cancelar</button>
+                    <button type="button" class="btn btn-danger" @onclick="DeleteQueue" disabled="@isDeletingQueue">
+                        @if (isDeletingQueue)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        Excluir Fila
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal de confirmação de limpeza de fila -->
+@if (showPurgeQueueModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Confirmar Limpeza da Fila</h5>
+                    <button type="button" class="btn-close" @onclick="HidePurgeQueueModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Tem certeza que deseja limpar todas as mensagens da fila <strong>@queueNameToPurge</strong>?</p>
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        <strong>Atenção:</strong> Todas as mensagens da fila serão removidas permanentemente!
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="HidePurgeQueueModal">Cancelar</button>
+                    <button type="button" class="btn btn-warning" @onclick="PurgeQueue" disabled="@isPurgingQueue">
+                        @if (isPurgingQueue)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        Limpar Fila
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string? QueueName { get; set; }
+
+    private List<SqsQueueInfo> queues = new();
+    private SqsQueueDetails? queueDetails;
+    private bool isLoading = true;
+    private bool hasError = false;
+    
+    // Create queue modal
+    private bool showCreateQueueModal = false;
+    private string newQueueName = string.Empty;
+    private bool isCreatingQueue = false;
+    
+    // Send message modal
+    private bool showSendMessageModal = false;
+    private string messageBody = string.Empty;
+    private string messageSubject = string.Empty;
+    private bool isSendingMessage = false;
+    private string selectedQueueUrl = string.Empty;
+    private string selectedQueueName = string.Empty;
+    
+    // Subscribe to SNS modal
+    private bool showSubscribeToSnsModal = false;
+    private List<SnsTopicInfo> availableTopics = new();
+    private string selectedTopicArn = string.Empty;
+    private bool isSubscribing = false;
+    private bool isLoadingTopics = false;
+    
+    // Delete and Purge Modals
+    private bool showDeleteQueueModal = false;
+    private bool showPurgeQueueModal = false;
+    private string queueToDelete = string.Empty;
+    private string queueNameToDelete = string.Empty;
+    private string queueToPurge = string.Empty;
+    private string queueNameToPurge = string.Empty;
+    private bool isDeletingQueue = false;
+    private bool isPurgingQueue = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        isLoading = true;
+        hasError = false;
+        StateHasChanged();
+
+        try
+        {
+            if (string.IsNullOrEmpty(QueueName))
+            {
+                var result = await LocalStackService.GetSqsQueuesAsync();
+                queues = result.IsSuccess && result.Data != null ? result.Data.ToList() : new List<SqsQueueInfo>();
+                queueDetails = null;
+            }
+            else
+            {
+                var result = await LocalStackService.GetSqsQueueDetailsAsync(QueueName);
+                queueDetails = result.IsSuccess ? result.Data : null;
+                queues.Clear();
+            }
+        }
+        catch (Exception)
+        {
+            hasError = true;
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RefreshData()
+    {
+        await LoadData();
+    }
+
+    private async Task NavigateToQueue(string queueName)
+    {
+        await JSRuntime.InvokeVoidAsync("window.location.href", $"/sqs/{queueName}");
+    }
+
+    private string FormatMessageBody(string body)
+    {
+        try
+        {
+            if (body.TrimStart().StartsWith("{") || body.TrimStart().StartsWith("["))
+            {
+                var jsonDoc = System.Text.Json.JsonDocument.Parse(body);
+                return System.Text.Json.JsonSerializer.Serialize(jsonDoc, new System.Text.Json.JsonSerializerOptions 
+                { 
+                    WriteIndented = true 
+                });
+            }
+        }
+        catch
+        {
+        }
+        
+        return body;
+    }
+
+    private bool IsSystemAttribute(string attributeName)
+    {
+        var systemAttributes = new[]
+        {
+            "SentTimestamp",
+            "ApproximateReceiveCount",
+            "ApproximateFirstReceiveTimestamp",
+            "SenderId"
+        };
+        
+        return systemAttributes.Contains(attributeName);
+    }
+
+    // Create Queue Modal Methods
+    private void ShowCreateQueueModal()
+    {
+        newQueueName = string.Empty;
+        showCreateQueueModal = true;
+    }
+
+    private void HideCreateQueueModal()
+    {
+        showCreateQueueModal = false;
+        newQueueName = string.Empty;
+    }
+
+    private async Task CreateQueue()
+    {
+        if (string.IsNullOrWhiteSpace(newQueueName))
+            return;
+
+        isCreatingQueue = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await LocalStackService.CreateSqsQueueAsync(newQueueName);
+            if (result.IsSuccess)
+            {
+                HideCreateQueueModal();
+                await LoadData();
+            }
+        }
+        finally
+        {
+            isCreatingQueue = false;
+            StateHasChanged();
+        }
+    }
+
+    // Send Message Modal Methods
+    private void ShowSendMessageModal(string queueUrl = "", string queueName = "")
+    {
+        messageBody = string.Empty;
+        messageSubject = string.Empty;
+        showSendMessageModal = true;
+        
+        // Se chamado da lista de filas, armazenar informações da fila
+        if (!string.IsNullOrEmpty(queueUrl) && !string.IsNullOrEmpty(queueName))
+        {
+            selectedQueueUrl = queueUrl;
+            selectedQueueName = queueName;
+        }
+    }
+
+    private void HideSendMessageModal()
+    {
+        showSendMessageModal = false;
+        messageBody = string.Empty;
+        messageSubject = string.Empty;
+    }
+
+    private async Task SendMessage()
+    {
+        string queueUrl = "";
+        
+        // Determinar qual fila usar
+        if (!string.IsNullOrEmpty(selectedQueueUrl))
+        {
+            queueUrl = selectedQueueUrl;
+        }
+        else if (queueDetails != null)
+        {
+            queueUrl = queueDetails.QueueInfo.Url;
+        }
+        
+        if (string.IsNullOrWhiteSpace(messageBody) || string.IsNullOrEmpty(queueUrl))
+            return;
+
+        isSendingMessage = true;
+        StateHasChanged();
+
+        try
+        {
+            var messageAttributes = new Dictionary<string, string>();
+            if (!string.IsNullOrWhiteSpace(messageSubject))
+            {
+                messageAttributes["Subject"] = messageSubject;
+            }
+
+            var result = await LocalStackService.SendSqsMessageAsync(queueUrl, messageBody, messageAttributes);
+            if (result.IsSuccess)
+            {
+                HideSendMessageModal();
+                await LoadData();
+            }
+        }
+        finally
+        {
+            isSendingMessage = false;
+            StateHasChanged();
+        }
+    }
+
+    // Subscribe to SNS Modal Methods
+    private async Task ShowSubscribeToSnsModal(string queueUrl = "", string queueName = "")
+    {
+        selectedTopicArn = string.Empty;
+        availableTopics.Clear();
+        showSubscribeToSnsModal = true;
+        
+        // Se chamado da lista de filas, armazenar informações da fila
+        if (!string.IsNullOrEmpty(queueUrl) && !string.IsNullOrEmpty(queueName))
+        {
+            selectedQueueUrl = queueUrl;
+            selectedQueueName = queueName;
+        }
+        
+        await LoadAvailableTopics();
+    }
+
+    private void HideSubscribeToSnsModal()
+    {
+        showSubscribeToSnsModal = false;
+        selectedTopicArn = string.Empty;
+        availableTopics.Clear();
+    }
+
+    private async Task LoadAvailableTopics()
+    {
+        isLoadingTopics = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await LocalStackService.GetSnsTopicsAsync();
+            if (result.IsSuccess && result.Data != null)
+            {
+                availableTopics = result.Data.ToList();
+            }
+        }
+        finally
+        {
+            isLoadingTopics = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SubscribeToSnsTopic()
+    {
+        if (string.IsNullOrWhiteSpace(selectedTopicArn) || queueDetails == null)
+            return;
+
+        isSubscribing = true;
+        StateHasChanged();
+
+        try
+        {
+            var queueArn = queueDetails.QueueInfo.Url.Replace("http://localhost:4566", "arn:aws:sqs:us-west-2:000000000000").Replace("/", ":");
+            var result = await LocalStackService.SubscribeSnsAsync(selectedTopicArn, "sqs", queueArn);
+            if (result.IsSuccess)
+            {
+                HideSubscribeToSnsModal();
+                await LoadData();
+            }
+        }
+        finally
+        {
+            isSubscribing = false;
+            StateHasChanged();
+        }
+    }
+
+    // Delete Queue Methods
+    private void ShowDeleteQueueModal(string queueUrl, string queueName)
+    {
+        queueToDelete = queueUrl;
+        queueNameToDelete = queueName;
+        showDeleteQueueModal = true;
+    }
+
+    private void HideDeleteQueueModal()
+    {
+        showDeleteQueueModal = false;
+        queueToDelete = string.Empty;
+        queueNameToDelete = string.Empty;
+    }
+
+    private async Task DeleteQueue()
+    {
+        if (string.IsNullOrEmpty(queueToDelete))
+            return;
+
+        isDeletingQueue = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await LocalStackService.DeleteSqsQueueAsync(queueToDelete);
+            if (result.IsSuccess)
+            {
+                HideDeleteQueueModal();
+                await LoadData();
+            }
+        }
+        finally
+        {
+            isDeletingQueue = false;
+            StateHasChanged();
+        }
+    }
+
+    // Purge Queue Methods
+    private void ShowPurgeQueueModal(string queueUrl, string queueName)
+    {
+        queueToPurge = queueUrl;
+        queueNameToPurge = queueName;
+        showPurgeQueueModal = true;
+    }
+
+    private void HidePurgeQueueModal()
+    {
+        showPurgeQueueModal = false;
+        queueToPurge = string.Empty;
+        queueNameToPurge = string.Empty;
+    }
+
+    private async Task PurgeQueue()
+    {
+        if (string.IsNullOrEmpty(queueToPurge))
+            return;
+
+        isPurgingQueue = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await LocalStackService.PurgeSqsQueueAsync(queueToPurge);
+            if (result.IsSuccess)
+            {
+                HidePurgeQueueModal();
+                await LoadData();
+            }
+        }
+        finally
+        {
+            isPurgingQueue = false;
+            StateHasChanged();
+        }
+    }
+}
+
+

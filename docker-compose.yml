@@ -1,0 +1,44 @@
+services:
+  localstack:
+    image: localstack/localstack:latest
+    ports:
+      - "4567:4566"
+      - "4510-4559:4510-4559"
+    environment:
+      - DEBUG=1
+      - SERVICES=s3,sqs,sns,secretsmanager
+      - AWS_DEFAULT_REGION=us-west-2
+      - PERSISTENCE=0
+      - ENFORCE_IAM=0
+    volumes:
+      - "localstack-data:/var/lib/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "./scripts:/etc/localstack/init/ready.d"
+    networks:
+      - localstack-network
+    restart: unless-stopped
+
+  visualizer:
+    build: 
+      context: ./AwsLocalStackVisualizer
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - LocalStack__ServiceUrl=http://localstack:4566
+      - LocalStack__Region=us-west-2
+      - LocalStack__AccessKey=dummy
+      - LocalStack__SecretKey=dummy
+    networks:
+      - localstack-network
+
+networks:
+  localstack-network:
+    driver: bridge
+
+volumes:
+  localstack-data:
+
+

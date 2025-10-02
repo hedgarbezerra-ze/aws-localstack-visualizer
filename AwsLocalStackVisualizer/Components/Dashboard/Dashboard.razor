@@ -1,0 +1,198 @@
+@page "/dashboard"
+@using AwsLocalStackVisualizer.Services
+@using AwsLocalStackVisualizer.Models
+@inject ILocalStackService LocalStackService
+@inject IJSRuntime JSRuntime
+@rendermode InteractiveServer
+
+<PageTitle>LocalStack Visualizer - Dashboard</PageTitle>
+
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1 class="display-4">LocalStack Dashboard</h1>
+            <p class="lead">Visão geral dos serviços AWS LocalStack</p>
+            <hr />
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="row">
+            <div class="col-12 text-center">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Carregando...</span>
+                </div>
+                <p class="mt-2">Conectando ao LocalStack...</p>
+            </div>
+        </div>
+    }
+    else if (dashboardData == null)
+    {
+        <div class="row">
+            <div class="col-12">
+                <div class="alert alert-danger" role="alert">
+                    <h4 class="alert-heading">Erro de Conexão</h4>
+                    <p>Não foi possível conectar ao LocalStack. Verifique se o serviço está executando.</p>
+                    <hr>
+                    <button class="btn btn-outline-danger" @onclick="LoadDashboardData">
+                        <i class="bi bi-arrow-clockwise"></i> Tentar Novamente
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-center">
+                    <small class="text-muted">Última atualização: @dashboardData.LastUpdated.ToString("dd/MM/yyyy HH:mm:ss")</small>
+                    <button class="btn btn-outline-primary btn-sm" @onclick="LoadDashboardData">
+                        <i class="bi bi-arrow-clockwise"></i> Atualizar
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            @foreach (var service in dashboardData.Services)
+            {
+                <div class="col-md-4 mb-4">
+                    <div class="card h-100 @GetCardClass(service)">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h5 class="card-title mb-0">
+                                    <i class="@GetServiceIcon(service.Name)"></i>
+                                    @service.Name
+                                </h5>
+                                <span class="badge @GetStatusBadgeClass(service)">
+                                    @GetStatusText(service)
+                                </span>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-6">
+                                    <div class="text-center">
+                                        <h3 class="text-primary mb-0">@service.ResourceCount</h3>
+                                        <small class="text-muted">@GetResourceLabel(service.Name)</small>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="text-center">
+                                        <div class="@GetHealthIcon(service) fs-2"></div>
+                                        <small class="text-muted">Status</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card-footer">
+                            <button class="btn btn-primary btn-sm w-100" @onclick="() => NavigateToService(service.Name)">
+                                <i class="bi bi-eye"></i> Visualizar @service.Name
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+
+        @if (!dashboardData.Services.Any())
+        {
+            <div class="row">
+                <div class="col-12">
+                    <div class="alert alert-info" role="alert">
+                        <h4 class="alert-heading">Nenhum serviço habilitado</h4>
+                        <p>Configure os serviços no arquivo appsettings.json para visualizá-los aqui.</p>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private DashboardData? dashboardData;
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDashboardData();
+    }
+
+    private async Task LoadDashboardData()
+    {
+        isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            dashboardData = await LocalStackService.GetDashboardDataAsync();
+        }
+        catch (Exception)
+        {
+            dashboardData = null;
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private string GetCardClass(ServiceStatus service)
+    {
+        return service.IsHealthy ? "border-success" : "border-warning";
+    }
+
+    private string GetStatusBadgeClass(ServiceStatus service)
+    {
+        return service.IsHealthy ? "bg-success" : "bg-warning";
+    }
+
+    private string GetStatusText(ServiceStatus service)
+    {
+        return service.IsHealthy ? "Online" : "Offline";
+    }
+
+    private string GetServiceIcon(string serviceName)
+    {
+        return serviceName switch
+        {
+            "S3" => "bi bi-cloud-upload",
+            "SQS" => "bi bi-list-ul",
+            "SNS" => "bi bi-megaphone",
+            _ => "bi bi-gear"
+        };
+    }
+
+    private string GetHealthIcon(ServiceStatus service)
+    {
+        return service.IsHealthy ? "bi bi-check-circle-fill text-success" : "bi bi-x-circle-fill text-danger";
+    }
+
+    private string GetResourceLabel(string serviceName)
+    {
+        return serviceName switch
+        {
+            "S3" => "Buckets",
+            "SQS" => "Filas",
+            "SNS" => "Tópicos",
+            _ => "Recursos"
+        };
+    }
+
+    private async Task NavigateToService(string serviceName)
+    {
+        var url = serviceName.ToLower() switch
+        {
+            "s3" => "/s3",
+            "sqs" => "/sqs",
+            "sns" => "/sns",
+            _ => "/dashboard"
+        };
+
+        await JSRuntime.InvokeVoidAsync("window.location.href", url);
+    }
+}
+
+

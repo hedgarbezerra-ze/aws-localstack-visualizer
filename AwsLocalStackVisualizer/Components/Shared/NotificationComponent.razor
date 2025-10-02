@@ -1,0 +1,162 @@
+@using AwsLocalStackVisualizer.Services
+@inject INotificationService NotificationService
+@implements IDisposable
+
+<style>
+    .notification-container .toast {
+        min-width: 300px;
+        max-width: 400px;
+    }
+    
+    .notification-container .btn-close {
+        cursor: pointer;
+        opacity: 0.8;
+    }
+    
+    .notification-container .btn-close:hover {
+        opacity: 1;
+    }
+    
+    .notification-container .toast-header {
+        border-bottom: 1px solid rgba(255,255,255,0.2);
+    }
+</style>
+
+@if (notifications.Any())
+{
+    <div class="notification-container position-fixed top-0 end-0 p-3" style="z-index: 1050;">
+        @if (notifications.Count > 1)
+        {
+            <div class="d-flex justify-content-end mb-2">
+                <button type="button" class="btn btn-sm btn-outline-secondary" 
+                        @onclick="ClearAllNotifications">
+                    <i class="fas fa-times"></i> Limpar Todas
+                </button>
+            </div>
+        }
+        @foreach (var notification in notifications.ToList())
+        {
+            <div class="toast show mb-2" role="alert" id="toast-@notification.Id">
+                <div class="toast-header @GetHeaderClass(notification.Type)">
+                    <i class="@GetIconClass(notification.Type) me-2"></i>
+                    <strong class="me-auto">@notification.Title</strong>
+                    <button type="button" class="btn-close btn-close-white" 
+                            @onclick="@(() => RemoveNotification(notification.Id))" 
+                            aria-label="Fechar">
+                    </button>
+                </div>
+                <div class="toast-body">
+                    @notification.Message
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<NotificationItem> notifications = new();
+    private Timer? autoRemoveTimer;
+
+    protected override void OnInitialized()
+    {
+        NotificationService.OnNotification += HandleNotification;
+        
+        autoRemoveTimer = new Timer(RemoveExpiredNotifications, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+    }
+
+    private void HandleNotification(NotificationMessage notification)
+    {
+        var item = new NotificationItem
+        {
+            Id = Guid.NewGuid(),
+            Type = notification.Type,
+            Title = notification.Title,
+            Message = notification.Message,
+            CreatedAt = DateTime.Now
+        };
+
+        notifications.Add(item);
+        
+        if (notifications.Count > 5)
+        {
+            notifications.RemoveAt(0);
+        }
+
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void RemoveNotification(Guid id)
+    {
+        var notification = notifications.FirstOrDefault(n => n.Id == id);
+        if (notification != null)
+        {
+            notifications.Remove(notification);
+            InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void ClearAllNotifications()
+    {
+        notifications.Clear();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void RemoveExpiredNotifications(object? state)
+    {
+        var expiredNotifications = notifications
+            .Where(n => DateTime.Now - n.CreatedAt > TimeSpan.FromSeconds(GetAutoRemoveSeconds(n.Type)))
+            .ToList();
+
+        if (expiredNotifications.Any())
+        {
+            foreach (var expired in expiredNotifications)
+            {
+                notifications.Remove(expired);
+            }
+            
+            InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static int GetAutoRemoveSeconds(NotificationType type) => type switch
+    {
+        NotificationType.Success => 3,
+        NotificationType.Info => 4,
+        NotificationType.Warning => 6,
+        NotificationType.Error => 8,
+        _ => 5
+    };
+
+    private static string GetHeaderClass(NotificationType type) => type switch
+    {
+        NotificationType.Success => "text-bg-success",
+        NotificationType.Info => "text-bg-info",
+        NotificationType.Warning => "text-bg-warning",
+        NotificationType.Error => "text-bg-danger",
+        _ => "text-bg-secondary"
+    };
+
+    private static string GetIconClass(NotificationType type) => type switch
+    {
+        NotificationType.Success => "fas fa-check-circle",
+        NotificationType.Info => "fas fa-info-circle",
+        NotificationType.Warning => "fas fa-exclamation-triangle",
+        NotificationType.Error => "fas fa-exclamation-circle",
+        _ => "fas fa-bell"
+    };
+
+    public void Dispose()
+    {
+        NotificationService.OnNotification -= HandleNotification;
+        autoRemoveTimer?.Dispose();
+    }
+
+    private class NotificationItem
+    {
+        public Guid Id { get; set; }
+        public NotificationType Type { get; set; }
+        public string Title { get; set; } = "";
+        public string Message { get; set; } = "";
+        public DateTime CreatedAt { get; set; }
+    }
+}
