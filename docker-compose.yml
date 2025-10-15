@@ -1,44 +1,46 @@
 services:
   localstack:
     image: localstack/localstack:latest
-    ports:
-      - "4567:4566"
-      - "4510-4559:4510-4559"
+    restart: always
     environment:
-      - DEBUG=1
-      - SERVICES=s3,sqs,sns,secretsmanager
+      - SERVICES=sqs,sns,s3,secretsmanager
       - AWS_DEFAULT_REGION=us-west-2
-      - PERSISTENCE=0
-      - ENFORCE_IAM=0
-    volumes:
-      - "localstack-data:/var/lib/localstack"
-      - "/var/run/docker.sock:/var/run/docker.sock"
-      - "./scripts:/etc/localstack/init/ready.d"
-    networks:
-      - localstack-network
-    restart: unless-stopped
-
-  visualizer:
-    build: 
-      context: ./AwsLocalStackVisualizer
-      dockerfile: Dockerfile
+      - EDGE_PORT=4566
     ports:
-      - "8080:8080"
+      - 4566:4566
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+
+  init-localstack:
+    image: amazon/aws-cli:latest
+    depends_on:
+      - localstack
     environment:
-      - ASPNETCORE_ENVIRONMENT=Production
+      - AWS_REGION=us-west-2
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+    entrypoint: >
+      /bin/sh -c "
+      echo 'Aguardando LocalStack inicializar...';
+      sleep 15;
+      echo 'Executando setup...';
+      /setup.sh
+      "
+    volumes:
+      - ./scripts/localstack/setup.sh:/setup.sh
+
+  aws-localstack-visualizer:
+    build:
+      context: .
+      dockerfile: AwsLocalStackVisualizer/Dockerfile
+    ports:
+      - "8081:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Docker
       - ASPNETCORE_URLS=http://+:8080
-      - LocalStack__ServiceUrl=http://localstack:4566
-      - LocalStack__Region=us-west-2
-      - LocalStack__AccessKey=dummy
-      - LocalStack__SecretKey=dummy
-    networks:
-      - localstack-network
-
-networks:
-  localstack-network:
-    driver: bridge
-
-volumes:
-  localstack-data:
+    depends_on:
+      - localstack
+      - init-localstack
+    restart: unless-stopped
 
 

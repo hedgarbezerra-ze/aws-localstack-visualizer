@@ -1,0 +1,221 @@
+@page "/help"
+@using System.Text
+@using Markdig
+@inject IWebHostEnvironment WebHostEnvironment
+@rendermode InteractiveServer
+
+<PageTitle>Ajuda - LocalStack Visualizer</PageTitle>
+
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1 class="display-5">
+                        Ajuda
+                    </h1>
+                    <p class="text-muted">Documentação e guias de uso do LocalStack Visualizer</p>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-outline-primary" @onclick="RefreshContent">
+                        <i class="bi bi-arrow-clockwise"></i> Atualizar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="row">
+            <div class="col-12 text-center">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Carregando...</span>
+                </div>
+                <p class="mt-2">Carregando documentação...</p>
+            </div>
+        </div>
+    }
+    else if (hasError)
+    {
+        <div class="row">
+            <div class="col-12">
+                <div class="alert alert-danger" role="alert">
+                    <h4 class="alert-heading">Erro ao carregar documentação</h4>
+                    <p>Não foi possível carregar o arquivo de documentação.</p>
+                    <button class="btn btn-outline-danger" @onclick="RefreshContent">
+                        <i class="bi bi-arrow-clockwise"></i> Tentar Novamente
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="bi bi-file-text"></i>
+                            Documentação
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="markdown-content">
+                            @((MarkupString)markdownContent)
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private bool isLoading = true;
+    private bool hasError = false;
+    private string markdownContent = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadMarkdownContent();
+    }
+
+    private async Task LoadMarkdownContent()
+    {
+        isLoading = true;
+        hasError = false;
+        StateHasChanged();
+
+        try
+        {
+            // Lê o arquivo da pasta de build usando IWebHostEnvironment
+            var readmePath = Path.Combine(AppContext.BaseDirectory, "README.md");
+            
+            if (File.Exists(readmePath))
+            {
+                var content = await File.ReadAllTextAsync(readmePath, Encoding.UTF8);
+                markdownContent = ConvertMarkdownToHtml(content);
+            }
+            else
+            {
+                // Fallback: tenta no diretório base da aplicação
+                var basePath = AppDomain.CurrentDomain.BaseDirectory;
+                var fallbackPath = Path.Combine(basePath, "README.md");
+                
+                if (File.Exists(fallbackPath))
+                {
+                    var content = await File.ReadAllTextAsync(fallbackPath, Encoding.UTF8);
+                    markdownContent = ConvertMarkdownToHtml(content);
+                }
+                else
+                {
+                    markdownContent = "<p class='text-muted'>Arquivo de documentação não encontrado.</p>";
+                }
+            }
+        }
+        catch (Exception)
+        {
+            hasError = true;
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RefreshContent()
+    {
+        await LoadMarkdownContent();
+    }
+
+    private string ConvertMarkdownToHtml(string markdown)
+    {
+        var pipeline = new MarkdownPipelineBuilder()
+            .UseAdvancedExtensions()
+            .UseEmphasisExtras()
+            .UseGenericAttributes()
+            .UseAutoLinks()
+            .UseAutoIdentifiers()
+            .UseTaskLists()
+            .UsePipeTables()
+            .UseGridTables()
+            .UseFootnotes()
+            .UseCitations()
+            .UseCustomContainers()
+            .UseEmojiAndSmiley()
+            .UseMathematics()
+            .UseBootstrap()
+            .UseYamlFrontMatter()
+            .Build();
+
+        var html = Markdown.ToHtml(markdown, pipeline);
+        
+        // Adicionar classes Bootstrap para melhor formatação
+        html = html
+            .Replace("<table>", "<table class=\"table table-striped table-hover\">")
+            .Replace("<blockquote>", "<blockquote class=\"blockquote\">")
+            .Replace("<pre>", "<pre class=\"bg-light p-3 rounded\">")
+            .Replace("<code>", "<code class=\"bg-light px-1 rounded\">");
+        
+        return html;
+    }
+}
+
+<style>
+    .markdown-content {
+        line-height: 1.6;
+    }
+
+    .markdown-content h1 {
+        border-bottom: 2px solid #007bff;
+        padding-bottom: 10px;
+        margin-bottom: 20px;
+    }
+
+    .markdown-content h2 {
+        border-bottom: 1px solid #dee2e6;
+        padding-bottom: 8px;
+        margin-top: 30px;
+        margin-bottom: 15px;
+    }
+
+    .markdown-content h3 {
+        margin-top: 25px;
+        margin-bottom: 10px;
+    }
+
+    .markdown-content h4, .markdown-content h5, .markdown-content h6 {
+        margin-top: 20px;
+        margin-bottom: 8px;
+    }
+
+    .markdown-content p {
+        margin-bottom: 15px;
+    }
+
+    .markdown-content ul, .markdown-content ol {
+        margin-bottom: 15px;
+    }
+
+    .markdown-content li {
+        margin-bottom: 5px;
+    }
+
+    .markdown-content .table {
+        margin-bottom: 20px;
+    }
+
+    .markdown-content .blockquote {
+        border-left: 4px solid #007bff;
+        margin: 15px 0;
+        padding-left: 15px;
+    }
+
+    .markdown-content pre {
+        overflow-x: auto;
+        margin-bottom: 15px;
+    }
+</style>

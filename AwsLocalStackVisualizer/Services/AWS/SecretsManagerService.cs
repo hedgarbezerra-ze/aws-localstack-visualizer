@@ -1,6 +1,9 @@
 using Amazon.SecretsManager;
 using Amazon.SecretsManager.Model;
-using AwsLocalStackVisualizer.Models;
+using AwsLocalStackVisualizer.Abstractions;
+using AwsLocalStackVisualizer.Models.Common;
+using AwsLocalStackVisualizer.Models.SecretsManager;
+using System.Runtime.CompilerServices;
 
 namespace AwsLocalStackVisualizer.Services.AWS;
 
@@ -12,9 +15,9 @@ public class SecretsManagerService : ISecretsManagerService
 
     public SecretsManagerService(AmazonSecretsManagerClient secretsManagerClient, ILogger<SecretsManagerService> logger, INotificationService notificationService)
     {
-        _secretsManagerClient = secretsManagerClient;
-        _logger = logger;
-        _notificationService = notificationService;
+        _secretsManagerClient = secretsManagerClient ?? throw new ArgumentNullException(nameof(secretsManagerClient));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
     }
 
     public async Task<OperationResult<IReadOnlyList<SecretInfo>>> GetSecretsAsync()
@@ -22,18 +25,50 @@ public class SecretsManagerService : ISecretsManagerService
         try
         {
             var response = await _secretsManagerClient.ListSecretsAsync(new ListSecretsRequest());
+            
+            if (response is not { SecretList: { } secretsList })
+            {
+                _logger.LogWarning("Resposta do Secrets Manager ListSecrets é nula ou não contém secrets");
+                return new OperationResult<IReadOnlyList<SecretInfo>>(true, []);
+            }
+
             var secrets = new List<SecretInfo>();
 
-            foreach (var secret in response.SecretList)
+            foreach (var secret in secretsList)
             {
-                secrets.Add(new SecretInfo(
-                    secret.Name,
-                    secret.ARN,
-                    secret.CreatedDate ?? DateTime.MinValue,
-                    secret.LastChangedDate,
-                    secret.Description,
-                    secret.Tags?.ToDictionary(t => t.Key, t => t.Value) ?? new Dictionary<string, string>()
-                ));
+                if (string.IsNullOrWhiteSpace(secret.Name))
+                {
+                    _logger.LogWarning("Secret com nome inválido encontrado, ignorando");
+                    continue;
+                }
+
+                try
+                {
+                    var tags = new Dictionary<string, string>();
+                    if (secret.Tags != null)
+                    {
+                        foreach (var tag in secret.Tags)
+                        {
+                            if (!string.IsNullOrWhiteSpace(tag.Key))
+                            {
+                                tags[tag.Key] = tag.Value ?? string.Empty;
+                            }
+                        }
+                    }
+
+                    secrets.Add(new SecretInfo(
+                        secret.Name,
+                        secret.ARN ?? string.Empty,
+                        secret.CreatedDate ?? DateTime.MinValue,
+                        secret.LastChangedDate,
+                        secret.Description ?? string.Empty,
+                        tags
+                    ));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Erro ao processar secret {SecretName}, ignorando", secret.Name);
+                }
             }
 
             return new OperationResult<IReadOnlyList<SecretInfo>>(true, secrets);
@@ -41,8 +76,97 @@ public class SecretsManagerService : ISecretsManagerService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao listar secrets");
-            _notificationService.ShowError($"Erro ao carregar secrets: {ex.Message}");
-            return new OperationResult<IReadOnlyList<SecretInfo>>(false, Array.Empty<SecretInfo>(), ex.Message, ex);
+            return new OperationResult<IReadOnlyList<SecretInfo>>(false, [], ex.Message, ex);
+        }
+    }
+
+    public async IAsyncEnumerable<SecretInfo> GetSecretsStreamAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        List<Task<SecretInfo?>> validSecrets;
+        try
+        {
+            var response = await _secretsManagerClient.ListSecretsAsync(new ListSecretsRequest());
+            
+            if (response is not { SecretList: { } secretsList })
+            {
+                _logger.LogWarning("Resposta do Secrets Manager ListSecrets é nula ou não contém secrets");
+                yield break;
+            }
+
+            validSecrets = secretsList
+                .Where(secret => !string.IsNullOrWhiteSpace(secret.Name))
+                .Select(secret => ProcessSecretAsync(secret))
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao listar secrets");
+            yield break;
+        }
+
+        await foreach (var secretInfo in ProcessSecretsSafelyAsync(validSecrets, cancellationToken))
+        {
+            yield return secretInfo;
+        }
+    }
+
+    private async IAsyncEnumerable<SecretInfo> ProcessSecretsSafelyAsync(List<Task<SecretInfo?>> secretTasks, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        foreach (var secretTask in secretTasks)
+        {
+            if (cancellationToken.IsCancellationRequested)
+                yield break;
+
+            var secretInfo = await GetSecretInfoSafelyAsync(secretTask);
+            if (secretInfo is not null)
+            {
+                yield return secretInfo;
+            }
+        }
+    }
+
+    private Task<SecretInfo?> ProcessSecretAsync(dynamic secret)
+    {
+        try
+        {
+            var tags = new Dictionary<string, string>();
+            if (secret.Tags != null)
+            {
+                foreach (var tag in secret.Tags)
+                {
+                    if (!string.IsNullOrWhiteSpace(tag.Key))
+                    {
+                        tags[tag.Key] = tag.Value ?? string.Empty;
+                    }
+                }
+            }
+
+            return Task.FromResult<SecretInfo?>(new SecretInfo(
+                secret.Name,
+                secret.ARN ?? string.Empty,
+                secret.CreatedDate ?? DateTime.MinValue,
+                secret.LastChangedDate,
+                secret.Description ?? string.Empty,
+                tags
+            ));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Erro ao processar secret {SecretName}, ignorando", (string)secret.Name);
+            return Task.FromResult<SecretInfo?>(null);
+        }
+    }
+
+    private async Task<SecretInfo?> GetSecretInfoSafelyAsync(Task<SecretInfo?> secretTask)
+    {
+        try
+        {
+            return await secretTask;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Erro ao processar secret");
+            return null;
         }
     }
 
@@ -63,12 +187,17 @@ public class SecretsManagerService : ISecretsManagerService
                 SecretId = secretName
             });
 
-            var versions = versionsResponse.Versions.Select(v => new SecretVersionInfo(
-                v.VersionId,
-                v.CreatedDate ?? DateTime.MinValue,
-                v.VersionStages?.Contains("AWSCURRENT") ?? false,
-                v.VersionStages?.ToList() ?? new List<string>()
-            )).ToList();
+            if (versionsResponse is not { Versions: { } versionsList })
+                return new OperationResult<SecretDetails>(true, new SecretDetails(secretInfo, []));
+
+            var versions = versionsList
+                .Where(v => v is not null and { VersionId: not null and not "" })
+                .Select(v => new SecretVersionInfo(
+                    v.VersionId,
+                    v.CreatedDate ?? DateTime.MinValue,
+                    v.VersionStages?.Contains("AWSCURRENT") ?? false,
+                    v.VersionStages?.ToList() ?? new List<string>()
+                )).ToList();
 
             var details = new SecretDetails(secretInfo, versions);
             return new OperationResult<SecretDetails>(true, details);
@@ -76,7 +205,6 @@ public class SecretsManagerService : ISecretsManagerService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao obter detalhes do secret {SecretName}", secretName);
-            _notificationService.ShowError($"Erro ao carregar detalhes do secret: {ex.Message}");
             return new OperationResult<SecretDetails>(false, null, ex.Message, ex);
         }
     }
@@ -95,11 +223,17 @@ public class SecretsManagerService : ISecretsManagerService
 
             var response = await _secretsManagerClient.GetSecretValueAsync(request);
             
+            if (response is null)
+            {
+                _logger.LogWarning("Resposta do Secrets Manager GetSecretValue é nula para secret {SecretName}", secretName);
+                return new OperationResult<SecretValue>(false, null, "Resposta inválida do Secrets Manager");
+            }
+            
             var secretValue = new SecretValue(
-                response.Name,
-                response.SecretString,
+                response.Name ?? secretName,
+                response.SecretString ?? string.Empty,
                 response.SecretBinary?.ToArray(),
-                response.VersionId,
+                response.VersionId ?? string.Empty,
                 response.CreatedDate ?? DateTime.MinValue
             );
 
@@ -108,7 +242,6 @@ public class SecretsManagerService : ISecretsManagerService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao obter valor do secret {SecretName}", secretName);
-            _notificationService.ShowError($"Erro ao obter valor do secret: {ex.Message}");
             return new OperationResult<SecretValue>(false, null, ex.Message, ex);
         }
     }
@@ -131,7 +264,6 @@ public class SecretsManagerService : ISecretsManagerService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao criar secret {SecretName}", name);
-            _notificationService.ShowError($"Erro ao criar secret: {ex.Message}");
             return new OperationResult<string>(false, null, ex.Message, ex);
         }
     }
@@ -153,7 +285,6 @@ public class SecretsManagerService : ISecretsManagerService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao atualizar secret {SecretName}", name);
-            _notificationService.ShowError($"Erro ao atualizar secret: {ex.Message}");
             return new OperationResult<bool>(false, false, ex.Message, ex);
         }
     }
@@ -178,7 +309,6 @@ public class SecretsManagerService : ISecretsManagerService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao excluir secret {SecretName}", name);
-            _notificationService.ShowError($"Erro ao excluir secret: {ex.Message}");
             return new OperationResult<bool>(false, false, ex.Message, ex);
         }
     }

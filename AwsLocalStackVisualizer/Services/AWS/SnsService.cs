@@ -1,6 +1,9 @@
 using Amazon.SimpleNotificationService;
 using Amazon.SimpleNotificationService.Model;
-using AwsLocalStackVisualizer.Models;
+using AwsLocalStackVisualizer.Abstractions;
+using AwsLocalStackVisualizer.Models.Common;
+using AwsLocalStackVisualizer.Models.SNS;
+using System.Runtime.CompilerServices;
 
 namespace AwsLocalStackVisualizer.Services.AWS;
 
@@ -12,9 +15,9 @@ public class SnsService : ISnsService
 
     public SnsService(AmazonSimpleNotificationServiceClient snsClient, ILogger<SnsService> logger, INotificationService notificationService)
     {
-        _snsClient = snsClient;
-        _logger = logger;
-        _notificationService = notificationService;
+        _snsClient = snsClient ?? throw new ArgumentNullException(nameof(snsClient));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
     }
 
     public async Task<OperationResult<IReadOnlyList<SnsTopicInfo>>> GetTopicsAsync()
@@ -22,28 +25,121 @@ public class SnsService : ISnsService
         try
         {
             var response = await _snsClient.ListTopicsAsync();
-            var topics = new List<SnsTopicInfo>();
-
-            foreach (var topic in response.Topics)
+            
+            if (response is { Topics: null or { Count: 0 } })
             {
-                var topicName = topic.TopicArn.Split(':').Last();
-                var subscriptions = await _snsClient.ListSubscriptionsByTopicAsync(topic.TopicArn);
-                
-                topics.Add(new SnsTopicInfo(
-                    topicName,
-                    topic.TopicArn,
-                    subscriptions.Subscriptions.Count,
-                    DateTime.UtcNow // SNS não fornece data de criação via API
-                ));
+                _logger.LogWarning("Resposta do SNS ListTopics é nula ou não contém tópicos");
+                return new OperationResult<IReadOnlyList<SnsTopicInfo>>(true, []);
             }
 
+            var topicTasks = new List<Task<SnsTopicInfo?>>();
+            
+            foreach (var topic in response.Topics)
+            {
+                if (string.IsNullOrWhiteSpace(topic.TopicArn))
+                {
+                    _logger.LogWarning("Tópico com ARN inválido encontrado, ignorando");
+                    continue;
+                }
+
+                topicTasks.Add(GetTopicInfoAsync(topic.TopicArn));
+            }
+
+            var topicResults = await Task.WhenAll(topicTasks);
+            var topics = topicResults.Where(t => t is not null).Cast<SnsTopicInfo>().ToList();
+            
             return new OperationResult<IReadOnlyList<SnsTopicInfo>>(true, topics);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao listar tópicos SNS");
-            _notificationService.ShowError($"Erro ao carregar tópicos SNS: {ex.Message}");
-            return new OperationResult<IReadOnlyList<SnsTopicInfo>>(false, Array.Empty<SnsTopicInfo>(), ex.Message, ex);
+            return new OperationResult<IReadOnlyList<SnsTopicInfo>>(false, [], ex.Message, ex);
+        }
+    }
+
+    public async IAsyncEnumerable<SnsTopicInfo> GetTopicsStreamAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        List<Task<SnsTopicInfo?>> validTopics;
+        try
+        {
+            var response = await _snsClient.ListTopicsAsync();
+            
+            if (response is { Topics: null or { Count: 0 } })
+            {
+                _logger.LogWarning("Resposta do SNS ListTopics é nula ou não contém tópicos");
+                yield break;
+            }
+
+            validTopics = response.Topics
+                .Where(topic => !string.IsNullOrWhiteSpace(topic.TopicArn))
+                .Select(topic => GetTopicInfoAsync(topic.TopicArn))
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao listar tópicos SNS");
+            yield break;
+        }
+
+        await foreach (var topicInfo in ProcessTopicsSafelyAsync(validTopics, cancellationToken))
+        {
+            yield return topicInfo;
+        }
+    }
+
+    private async IAsyncEnumerable<SnsTopicInfo> ProcessTopicsSafelyAsync(List<Task<SnsTopicInfo?>> topicTasks, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        foreach (var topicTask in topicTasks)
+        {
+            if (cancellationToken.IsCancellationRequested)
+                yield break;
+
+            var topicInfo = await GetTopicInfoSafelyAsync(topicTask);
+            if (topicInfo is not null)
+            {
+                yield return topicInfo;
+            }
+        }
+    }
+
+    private async Task<SnsTopicInfo?> GetTopicInfoAsync(string topicArn)
+    {
+        try
+        {
+            var topicName = topicArn.Split(':').LastOrDefault();
+            if (string.IsNullOrWhiteSpace(topicName))
+            {
+                _logger.LogWarning("Nome do tópico não pôde ser extraído do ARN {TopicArn}, ignorando", topicArn);
+                return null;
+            }
+
+            var subscriptions = await _snsClient.ListSubscriptionsByTopicAsync(topicArn);
+            var subscriptionCount = subscriptions?.Subscriptions?.Count ?? 0;
+            
+            return new SnsTopicInfo(
+                topicName,
+                topicArn,
+                subscriptionCount,
+                DateTime.UtcNow
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Erro ao obter detalhes do tópico {TopicArn}, ignorando", topicArn);
+            return null;
+        }
+    }
+
+    private async Task<SnsTopicInfo?> GetTopicInfoSafelyAsync(Task<SnsTopicInfo?> topicTask)
+    {
+        try
+        {
+            return await topicTask;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Erro ao obter informações do tópico");
+            return null;
         }
     }
 
@@ -57,30 +153,62 @@ public class SnsService : ISnsService
                 
             var topicInfo = topicsResult.Data.FirstOrDefault(t => t.Arn == topicArn);
             
-            if (topicInfo == null)
+            if (topicInfo is null)
             {
                 var topicName = topicArn.Split(':').Last();
                 topicInfo = new SnsTopicInfo(topicName, topicArn, 0, DateTime.UtcNow);
             }
 
             var response = await _snsClient.ListSubscriptionsByTopicAsync(topicArn);
-            var subscriptions = response.Subscriptions.Select(sub => new SnsSubscriptionInfo(
-                sub.SubscriptionArn,
-                sub.Protocol,
-                sub.Endpoint,
-                !string.IsNullOrEmpty(sub.SubscriptionArn) && sub.SubscriptionArn != "PendingConfirmation",
-                sub.Owner
-            )).ToList();
+            
+            if (response is not { Subscriptions: { } subscriptionsList })
+                return new OperationResult<SnsTopicDetails>(true, new SnsTopicDetails(topicInfo, []));
+
+            var subscriptions = subscriptionsList
+                .Where(sub => sub is not null)
+                .Select(sub => new SnsSubscriptionInfo(
+                    sub.SubscriptionArn ?? string.Empty,
+                    sub.Protocol ?? string.Empty,
+                    sub.Endpoint ?? string.Empty,
+                    !string.IsNullOrEmpty(sub.SubscriptionArn) && sub.SubscriptionArn != "PendingConfirmation",
+                    sub.Owner ?? string.Empty
+                )).ToList();
 
             return new OperationResult<SnsTopicDetails>(true, new SnsTopicDetails(topicInfo, subscriptions));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao obter detalhes do tópico {TopicArn}", topicArn);
-            _notificationService.ShowError($"Erro ao carregar detalhes do tópico: {ex.Message}");
             var topicName = topicArn.Split(':').Last();
             var defaultTopic = new SnsTopicInfo(topicName, topicArn, 0, DateTime.UtcNow);
-            return new OperationResult<SnsTopicDetails>(false, new SnsTopicDetails(defaultTopic, Array.Empty<SnsSubscriptionInfo>()), ex.Message, ex);
+            return new OperationResult<SnsTopicDetails>(false, new SnsTopicDetails(defaultTopic, []), ex.Message, ex);
+        }
+    }
+
+    public async Task<OperationResult<IReadOnlyList<SnsSubscriptionInfo>>> GetSubscriptionsAsync(string topicArn)
+    {
+        try
+        {
+            var response = await _snsClient.ListSubscriptionsByTopicAsync(topicArn);
+            if(response is { Subscriptions: null or { Capacity: 0 } })
+                return new OperationResult<IReadOnlyList<SnsSubscriptionInfo>>(true, []);
+            
+            var subscriptions = response.Subscriptions
+                .Where(sub => sub is not null)
+                .Select(sub => new SnsSubscriptionInfo(
+                    sub.SubscriptionArn ?? string.Empty,
+                    sub.Protocol ?? string.Empty,
+                    sub.Endpoint ?? string.Empty,
+                    !string.IsNullOrEmpty(sub.SubscriptionArn) && sub.SubscriptionArn != "PendingConfirmation",
+                    sub.Owner ?? string.Empty
+                )).ToList();
+
+            return new OperationResult<IReadOnlyList<SnsSubscriptionInfo>>(true, subscriptions);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao obter assinaturas do tópico {TopicArn}", topicArn);
+            return new OperationResult<IReadOnlyList<SnsSubscriptionInfo>>(false, [], ex.Message, ex);
         }
     }
 
@@ -107,7 +235,6 @@ public class SnsService : ISnsService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao criar tópico SNS {TopicName}", topicName);
-            _notificationService.ShowError($"Erro ao criar tópico: {ex.Message}");
             return new OperationResult<string>(false, null, ex.Message, ex);
         }
     }
@@ -116,11 +243,15 @@ public class SnsService : ISnsService
     {
         try
         {
+            var finalSubject = string.IsNullOrWhiteSpace(subject) 
+                ? $"Mensagem SNS - {DateTime.Now:dd/MM/yyyy HH:mm:ss}"
+                : subject;
+
             var request = new PublishRequest
             {
                 TopicArn = topicArn,
                 Message = message,
-                Subject = subject
+                Subject = finalSubject
             };
 
             if (messageAttributes != null && messageAttributes.Any())
@@ -143,7 +274,6 @@ public class SnsService : ISnsService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao publicar mensagem no tópico SNS {TopicArn}", topicArn);
-            _notificationService.ShowError($"Erro ao publicar mensagem: {ex.Message}");
             return new OperationResult<string>(false, null, ex.Message, ex);
         }
     }
@@ -173,7 +303,6 @@ public class SnsService : ISnsService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao criar assinatura para tópico SNS {TopicArn}", topicArn);
-            _notificationService.ShowError($"Erro ao criar assinatura: {ex.Message}");
             return new OperationResult<string>(false, null, ex.Message, ex);
         }
     }
@@ -191,7 +320,6 @@ public class SnsService : ISnsService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao excluir tópico SNS {TopicArn}", topicArn);
-            _notificationService.ShowError($"Erro ao excluir tópico: {ex.Message}");
             return new OperationResult<bool>(false, false, ex.Message, ex);
         }
     }
@@ -209,8 +337,8 @@ public class SnsService : ISnsService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao remover assinatura SNS {SubscriptionArn}", subscriptionArn);
-            _notificationService.ShowError($"Erro ao remover assinatura: {ex.Message}");
             return new OperationResult<bool>(false, false, ex.Message, ex);
         }
     }
 }
+

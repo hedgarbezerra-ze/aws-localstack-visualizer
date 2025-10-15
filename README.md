@@ -1,212 +1,624 @@
-# LocalStack Visualizer
+# AWS LocalStack Visualizer
 
-Um visualizador moderno e intuitivo para recursos AWS LocalStack, desenvolvido em .NET 9 Blazor Server.
+Uma aplicação Blazor para visualizar e gerenciar recursos AWS tanto no LocalStack quanto na AWS real.
 
-## 🚀 Características
+## Características
 
-- **Dashboard Interativo**: Visão geral de todos os serviços AWS habilitados
-- **Navegador S3**: Visualize buckets, objetos e conteúdos
-- **Gerenciador SQS**: Monitore filas e visualize mensagens
-- **Visualizador SNS**: Gerencie tópicos e assinaturas
-- **Interface Responsiva**: Design moderno usando Bootstrap
-- **Suporte Docker**: Deploy fácil com docker-compose
-- **Configuração Flexível**: Todas as configurações via appsettings.json
+- **S3 Browser**: Navegação, upload, download e gerenciamento de buckets
+- **SQS Manager**: Visualização e gerenciamento de filas
+- **SNS Viewer**: Gerenciamento de tópicos e assinaturas
+- **Secrets Manager**: Visualização e gerenciamento de secrets
+- **Upload Inteligente**: Extensão automática baseada no arquivo
+- **Interface Responsiva**: Design moderno com Bootstrap
+- **Modo ReadOnly**: Desabilita ações quando conectado à AWS real
+- **Página de Ajuda**: Documentação integrada com Markdown
 
-## 🛠️ Tecnologias Utilizadas
 
-- **.NET 9** - Framework principal
-- **Blazor Server** - Interface de usuário interativa
-- **AWS SDK** - Integração com serviços AWS
-- **Bootstrap 5** - Design responsivo
-- **Docker** - Containerização
+## Funcionalidades
 
-## 📋 Pré-requisitos
+### S3 (Simple Storage Service)
+- Listagem de buckets com estatísticas
+- Navegação por objetos e pastas
+- Upload com extensão automática
+- Download de arquivos
+- Criação e exclusão de buckets
+- Visualização de metadados
 
-- [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0)
-- [Docker](https://www.docker.com/get-started) e [Docker Compose](https://docs.docker.com/compose/)
-- [LocalStack](https://localstack.cloud/) (incluído no docker-compose)
+### SQS (Simple Queue Service)
+- Listagem de filas com métricas
+- Visualização de mensagens
+- Envio de mensagens de teste
+- Gerenciamento de Dead Letter Queues
+- Estatísticas em tempo real
 
-## 🚀 Início Rápido
+### SNS (Simple Notification Service)
+- Listagem de tópicos
+- Gerenciamento de assinaturas
+- Envio de mensagens de teste
+- Configuração de endpoints
 
-### Opção 1: Docker Compose (Recomendado)
+### Secrets Manager
+- Listagem de secrets
+- Visualização de valores (mascarados)
+- Criação e exclusão de secrets
+- Gerenciamento de versões
 
-1. Clone o repositório:
+## Início Rápido
+
+### 1. **Docker (Recomendado para LocalStack)**
 ```bash
-git clone <repository-url>
-cd aws-localstack-visualizer
-```
+# Build e execução completa
+docker-compose up --build
 
-2. Inicie os serviços:
-```bash
-docker-compose up -d
-```
+# Ou build individual
+docker build -f AwsLocalStackVisualizer/Dockerfile AwsLocalStackVisualizer
 
-3. Acesse a aplicação:
-- **Visualizador**: http://localhost:8080
+docker run -d -p 8081:8080 --name aws-localstack-visualizer aws-localstack-visualizer
+```
+- **Acesso**: http://localhost:8080 (docker-compose) ou http://localhost:8081 (build individual)
 - **LocalStack**: http://localhost:4566
+- **Modo Completo**: Todas as ações habilitadas
+- **Ambiente Seguro**: Não afeta AWS real
+- **Configuração Automática**: Usa `appsettings.Docker.json`
 
-### Opção 2: Desenvolvimento Local
-
-1. Clone o repositório:
+### 2. **Desenvolvimento Local (IDE)**
 ```bash
-git clone <repository-url>
-cd aws-localstack-visualizer/AwsLocalStackVisualizer
+# Executar com LocalStack
+dotnet run --environment Development
+```
+- **Acesso**: http://localhost:5266
+- **LocalStack**: http://localhost:4566
+- **Modo Completo**: Todas as ações habilitadas
+- **Ambiente Seguro**: Não afeta AWS real
+- **Configuração**: Usa `appsettings.Development.json`
+
+### 3. **AWS Real (Produção)**
+```bash
+# Executar aplicação
+dotnet run --environment Production
+```
+- **Modo ReadOnly**: Apenas visualização
+- **Ambiente Real**: Conecta à AWS real
+- **Sem Modificações**: Botões desabilitados
+- **Configuração**: Usa `appsettings.Production.json`
+
+## 🐳 Docker - Específico para LocalStack
+
+### **Características do Docker**
+- ✅ **Funciona apenas com LocalStack**: Não conecta à AWS real
+- ✅ **Configuração isolada**: `appsettings.Docker.json` específico
+- ✅ **Logs detalhados**: Serilog configurado para console
+- ✅ **Porta flexível**: 8080 (docker-compose) ou 8081 (build individual)
+- ✅ **IDE integrado**: Perfil "Docker" no launchSettings.json
+
+### **Limitações do Docker**
+- ❌ **Não funciona com AWS real**: Apenas LocalStack
+- ❌ **Sem autenticação AWS**: Usa credenciais de teste
+- ❌ **Ambiente isolado**: Não acessa recursos AWS externos
+
+### **Quando usar Docker**
+- 🎯 **Desenvolvimento com LocalStack**
+- 🎯 **Testes isolados**
+- 🎯 **Demonstrações**
+- 🎯 **Ambiente de desenvolvimento**
+
+### **Quando NÃO usar Docker**
+- ❌ **Produção com AWS real**
+- ❌ **Acesso a recursos AWS existentes**
+- ❌ **Autenticação AWS SSO/STS**
+
+### **Usando Docker na IDE**
+1. **Selecione o perfil "Docker"** no launchSettings.json
+2. **Configure o LocalStack** para rodar na porta 4566
+3. **Execute o projeto** - será buildado e executado no Docker
+4. **Acesse**: http://localhost:8081
+5. **Logs**: Visíveis no console da IDE
+
+### **Comandos Docker Úteis**
+```bash
+# Build individual
+docker build -f AwsLocalStackVisualizer/Dockerfile AwsLocalStackVisualizer
+
+# Executar com porta específica
+docker run -d -p 8081:8080 --name aws-localstack-visualizer aws-localstack-visualizer
+
+# Ver logs
+docker logs -f aws-localstack-visualizer
+
+# Parar container
+docker stop aws-localstack-visualizer
+
+# Remover container
+docker rm aws-localstack-visualizer
 ```
 
-2. Inicie o LocalStack separadamente:
-```bash
-docker run --rm -it -p 4566:4566 -e SERVICES=s3,sqs,sns localstack/localstack
-```
+## Configuração por Ambiente
 
-3. Execute a aplicação:
-```bash
-dotnet run
-```
-
-4. Acesse: https://localhost:7000 ou http://localhost:5000
-
-## ⚙️ Configuração
-
-### appsettings.json
+### **Docker (LocalStack)**
+- **Arquivo**: `appsettings.Docker.json`
+- **Uso**: Docker build/run ou perfil "Docker" na IDE
+- **Modo**: Completo (criar/editar/excluir)
+- **URL LocalStack**: `http://host.docker.internal:4566`
+- **Logs**: Configurados para console com Serilog
 
 ```json
 {
-  "LocalStack": {
-    "ServiceUrl": "http://localhost:4566",
-    "Region": "us-east-1",
-    "AccessKey": "test",
-    "SecretKey": "test",
-    "Services": {
-      "S3": { "Enabled": true },
-      "SQS": { "Enabled": true },
-      "SNS": { "Enabled": true }
+  "AWS": {
+    "UseLocalStack": true,
+    "Region": "us-west-2",
+    "ServiceUrl": "http://host.docker.internal:4566",
+    "Credentials": {
+      "Type": "Basic",
+      "AccessKey": "test",
+      "SecretKey": "test"
     }
   }
 }
 ```
 
-### Variáveis de Ambiente (Docker)
+### **AWS Real (Produção)**
+- **Arquivo**: `appsettings.Production.json`
+- **Uso**: `dotnet run --environment Production --project AwsLocalStackVisualizer`
+- **Modo**: ReadOnly (apenas visualização)
+- **Credenciais**: Configuradas manualmente no `appsettings.Production.json`
+
+```json
+{
+  "AWS": {
+    "UseLocalStack": false,
+    "Region": "us-west-2",
+    "Credentials": {
+      "Type": "Session",
+      "AccessKey": "ASIA...",
+      "SecretKey": "...",
+      "SessionToken": "IQoJb3JpZ2luX2VjEC8aCXVzLXdlc3QtMiJHMEUCI..."
+    }
+  }
+}
+```
+
+## Docker
+
+### **Execução com Docker**
+O projeto inclui configuração completa para Docker com LocalStack:
 
 ```bash
-LocalStack__ServiceUrl=http://localstack:4566
-LocalStack__Region=us-east-1
-LocalStack__AccessKey=test
-LocalStack__SecretKey=test
-LocalStack__Services__S3__Enabled=true
-LocalStack__Services__SQS__Enabled=true
-LocalStack__Services__SNS__Enabled=true
+# Iniciar todos os serviços
+docker-compose up --build
+
+# Acessar aplicação
+# http://localhost:8080
+
+# Acessar LocalStack
+# http://localhost:4566
 ```
 
-## 📱 Funcionalidades
+### **Serviços Docker**
+- **aws-localstack-visualizer**: Aplicação .NET 9
+- **localstack**: Simulador AWS
+- **init-localstack**: Configuração automática de recursos
 
-### Dashboard
-- Visão geral de todos os serviços
-- Status de conectividade
-- Contagem de recursos
-- Navegação rápida
+### **Docker Compose (Recomendado)**
+```bash
+# Execução completa
+docker-compose up --build
 
-### S3 Browser
-- Listagem de buckets
-- Navegação de objetos
-- Visualização de conteúdo
-- Informações de tamanho e data
+# Com limpeza
+docker-compose down -v
+```
 
-### SQS Manager
-- Listagem de filas
-- Visualização de mensagens
-- Contadores de mensagens
-- Formatação JSON automática
+### **Comandos Úteis**
+```bash
+# Ver logs
+docker-compose logs -f
 
-### SNS Viewer
-- Listagem de tópicos
-- Detalhes de assinaturas
-- Status de confirmação
-- Estatísticas por protocolo
+# Parar serviços
+docker-compose down
 
-## 🐳 Docker
+# Reiniciar
+docker-compose restart
 
-### Build Manual
+# Status
+docker-compose ps
+```
+
+## Configuração Manual para AWS Real
+
+### **Credenciais AWS**
+**Uso**: Configurar credenciais para ambiente de produção
 
 ```bash
-cd AwsLocalStackVisualizer
-docker build -t localstack-visualizer .
+# 1. Verificar perfis disponíveis
+aws configure list-profiles
+
+# 2. Configurar credenciais
+aws configure
+
+# 3. Executar aplicação
+dotnet run --environment Production
 ```
 
-### Executar Container
+**Configuração manual:**
+- Configure credenciais AWS via `aws configure`
+- Ou edite diretamente o `appsettings.Production.json`
+- Execute a aplicação com ambiente Production
+
+### **LocalStack Setup**
+**Uso**: Configurar recursos de exemplo no LocalStack
 
 ```bash
-docker run -p 8080:8080 \
-  -e LocalStack__ServiceUrl=http://host.docker.internal:4566 \
-  localstack-visualizer
+# 1. Executar LocalStack
+docker-compose up localstack -d
+
+# 2. Verificar recursos
+aws --endpoint-url=http://localhost:4566 s3 ls
 ```
 
-## 🧪 Testando com LocalStack
+**Recursos criados automaticamente:**
+- **S3**: Buckets com arquivos de exemplo
+- **SQS**: Filas com mensagens de teste
+- **SNS**: Tópicos com assinaturas
+- **Secrets**: Secrets com valores de exemplo
 
-### Criar recursos de exemplo:
+## Autenticação AWS
 
+### **Para LocalStack (Desenvolvimento)**
+```json
+{
+  "AWS": {
+    "UseLocalStack": true,
+    "Credentials": {
+      "Type": "Basic",
+      "AccessKey": "test",
+      "SecretKey": "test"
+    }
+  }
+}
+```
+
+### **Para AWS Real (Produção)**
 ```bash
-# S3 Bucket
-aws --endpoint-url=http://localhost:4566 s3 mb s3://test-bucket
-aws --endpoint-url=http://localhost:4566 s3 cp README.md s3://test-bucket/
+# 1. Configurar credenciais AWS
+aws configure
 
-# SQS Queue
-aws --endpoint-url=http://localhost:4566 sqs create-queue --queue-name test-queue
-aws --endpoint-url=http://localhost:4566 sqs send-message --queue-url http://localhost:4566/000000000000/test-queue --message-body "Hello World"
-
-# SNS Topic
-aws --endpoint-url=http://localhost:4566 sns create-topic --name test-topic
-aws --endpoint-url=http://localhost:4566 sns subscribe --topic-arn arn:aws:sns:us-east-1:000000000000:test-topic --protocol email --notification-endpoint test@example.com
+# 2. Editar appsettings.Production.json
+{
+  "AWS": {
+    "UseLocalStack": false,
+    "Credentials": {
+      "Type": "Session",
+      "AccessKey": "ASIA...",
+      "SecretKey": "...",
+      "SessionToken": "IQoJb3JpZ2luX2VjEC8aCXVzLXdlc3QtMiJHMEUCI..."
+    }
+  }
+}
 ```
 
-## 🔧 Desenvolvimento
+### **Tipos de Credenciais Suportadas**
 
-### Estrutura do Projeto
+| Tipo | Uso | Ambiente | Modo |
+|------|-----|----------|------|
+| **Basic** | LocalStack | Desenvolvimento | Completo |
+| **Session** | AWS Real | Produção | ReadOnly |
+| **Anonymous** | LocalStack | Teste | Completo |
+| **Default** | AWS Real | Desenvolvimento | ReadOnly |
 
-```
-AwsLocalStackVisualizer/
-├── Components/
-│   ├── Dashboard/          # Componentes do dashboard
-│   ├── S3/                 # Componentes do S3
-│   ├── SQS/                # Componentes do SQS
-│   ├── SNS/                # Componentes do SNS
-│   └── Shared/             # Componentes compartilhados
-├── Configuration/          # Classes de configuração
-├── Models/                 # Modelos de dados
-├── Services/              # Serviços de negócio
-└── Program.cs             # Ponto de entrada
-```
+## Docker Compose (Recomendado)
 
-### Executar em Desenvolvimento
-
-```bash
-dotnet watch run
-```
-
-## 🚀 Deploy
-
-### Docker Compose (Produção)
+### Opção 1: LocalStack + Visualizer
 
 ```yaml
 version: '3.8'
 services:
-  visualizer:
-    image: localstack-visualizer
+  localstack:
+    image: localstack/localstack:latest
     ports:
-      - "80:8080"
+      - "4566:4566"
     environment:
-      - LocalStack__ServiceUrl=http://your-localstack:4566
+      - SERVICES=s3,sqs,sns,secretsmanager
+      - DEBUG=1
+      - DATA_DIR=/tmp/localstack/data
+    volumes:
+      - "./tmp/localstack:/tmp/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+
+  visualizer:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=LocalStack
+    depends_on:
+      - localstack
 ```
 
-## 📝 Licença
+### Opção 2: Apenas LocalStack
 
-Este projeto está sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
+```yaml
+version: '3.8'
+services:
+  localstack:
+    image: localstack/localstack:latest
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3,sqs,sns,secretsmanager
+      - DEBUG=1
+      - DATA_DIR=/tmp/localstack/data
+    volumes:
+      - "./tmp/localstack:/tmp/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+```
 
-## 🤝 Contribuição
+## Execução
 
-Contribuições são bem-vindas! Por favor, abra uma issue ou pull request.
+### **1. LocalStack (Desenvolvimento)**
+```bash
+# Opção A: Apenas aplicação
+dotnet run --environment LocalStack
 
-## 📞 Suporte
+# Opção B: Com Docker Compose
+docker-compose up
+```
 
-Para suporte e dúvidas, abra uma issue no repositório do projeto.
+**Características:**
+- **Modo Completo**: Criar, editar, excluir recursos
+- **Ambiente Seguro**: Não afeta AWS real
+- **Dados de Exemplo**: Scripts criam recursos automaticamente
 
+### **2. AWS Real (Produção)**
+```bash
+# 1. Configurar credenciais AWS
+aws configure
 
+# 2. Atualizar appsettings.Production.json
+
+# 3. Executar aplicação
+dotnet run --environment Production
+```
+
+**Características:**
+- **Modo ReadOnly**: Apenas visualização
+- **Ambiente Real**: Conecta à AWS real
+- **Sem Modificações**: Botões desabilitados para segurança
+
+### **3. Docker Compose**
+```bash
+# LocalStack + Visualizer
+docker-compose up
+
+# Apenas LocalStack
+docker-compose up localstack
+```
+
+## Recursos Criados Automaticamente
+
+### **LocalStack (Desenvolvimento)**
+O docker-compose cria automaticamente:
+
+#### **S3 Buckets**
+- `sample-bucket-1` - Com arquivos de exemplo
+- `sample-bucket-2` - Bucket vazio  
+- `logs-bucket` - Para logs
+
+#### **SQS Queues**
+- `sample-queue` - Fila simples
+- `sample-dlq` - Dead Letter Queue
+- `orders-queue` - Com DLQ configurada
+
+#### **SNS Topics**
+- `order-notifications` - Notificações de pedidos
+- `user-events` - Eventos de usuário
+- `system-alerts` - Alertas do sistema
+
+#### **Secrets Manager**
+- `database-credentials` - Credenciais do banco
+- `api-keys` - Chaves de APIs
+- `app-config` - Configurações da aplicação
+
+### **AWS Real (Produção)**
+- **Recursos**: Existentes na sua conta AWS
+- **Modo**: Apenas visualização (ReadOnly)
+- **Segurança**: Botões de modificação desabilitados
+
+## Estrutura do Projeto
+
+```
+AwsLocalStackVisualizer/
+├── Components/           # Componentes Blazor
+│   ├── Dashboard/        # Dashboard principal
+│   ├── Layout/          # Layout e navegação
+│   ├── Pages/           # Páginas da aplicação
+│   ├── S3/              # Componentes S3
+│   ├── SQS/             # Componentes SQS
+│   ├── SNS/             # Componentes SNS
+│   ├── SecretsManager/  # Componentes Secrets Manager
+│   └── Shared/          # Componentes compartilhados
+├── Services/            # Serviços de negócio
+├── Configuration/       # Configurações e factories
+├── Models/              # Modelos de dados
+├── Abstractions/        # Interfaces
+├── Validators/          # Validações
+├── Handlers/            # Handlers de exceção
+└── Extensions/          # Extensões
+```
+
+## Acessos
+
+### **Aplicação**
+- **URL**: http://localhost:8080
+- **Página de Ajuda**: http://localhost:8080/help
+- **Dashboard**: http://localhost:8080
+
+### **LocalStack**
+- **Health Check**: http://localhost:4566/_localstack/health
+- **Porta**: 4566 (S3, SQS, SNS, SecretsManager)
+
+### **Recursos AWS**
+- **S3**: Buckets e objetos
+- **SQS**: Filas e mensagens  
+- **SNS**: Tópicos e assinaturas
+- **Secrets Manager**: Secrets e versões
+
+## Comandos Úteis
+
+### Verificar Conexão AWS
+
+```bash
+# Verificar identidade
+aws sts get-caller-identity --profile seu-perfil
+
+# Listar perfis
+aws configure list-profiles
+
+# Renovar token SSO
+aws sso login --profile seu-perfil
+```
+
+### Verificar LocalStack
+
+```bash
+# Health check
+curl http://localhost:4566/_localstack/health
+
+# Listar buckets
+aws --endpoint-url=http://localhost:4566 s3 ls
+
+# Listar filas
+aws --endpoint-url=http://localhost:4566 sqs list-queues
+```
+
+## Troubleshooting
+
+### **Problemas Comuns**
+
+#### **Token Expirado (AWS Real)**
+- **Problema**: `The security token included in the request is invalid`
+- **Solução**: 
+  1. Renove o token: `aws sso login --profile seu-perfil`
+  2. Configure credenciais: `aws configure`
+  3. Atualize o `appsettings.Production.json`
+
+#### **Credenciais Inválidas**
+- **Problema**: `The AWS Access Key Id you provided does not exist in our records`
+- **Solução**: 
+  1. Verifique se o perfil existe: `aws configure list-profiles`
+  2. Configure credenciais: `aws configure`
+  3. Copie as credenciais corretas para `appsettings.Production.json`
+
+#### **LocalStack Não Conecta**
+- **Problema**: Erro de conexão com LocalStack
+- **Solução**: 
+  1. Verifique se `UseLocalStack: true`
+  2. Verifique se LocalStack está rodando: `docker-compose up localstack`
+  3. Teste: `curl http://localhost:4566/_localstack/health`
+
+#### **Configuração AWS Não Funciona**
+- **Problema**: `Credenciais inválidas ou expiradas`
+- **Solução**: 
+  1. Execute: `aws sso login --profile seu-perfil`
+  2. Aguarde o login no navegador
+  3. Configure: `aws configure`
+
+#### **Modo ReadOnly Ativado**
+- **Problema**: Botões desabilitados na interface
+- **Solução**: 
+  - **Normal**: Quando `UseLocalStack: false` (AWS real)
+  - **Para testar**: Use `UseLocalStack: true` (LocalStack)
+
+### **Verificações de Saúde**
+
+#### **AWS Real**
+```bash
+# Verificar identidade
+aws sts get-caller-identity --profile seu-perfil
+
+# Testar credenciais
+aws sts get-caller-identity
+```
+
+#### **LocalStack**
+```bash
+# Health check
+curl http://localhost:4566/_localstack/health
+
+# Testar S3
+aws --endpoint-url=http://localhost:4566 s3 ls
+
+# Testar SQS
+aws --endpoint-url=http://localhost:4566 sqs list-queues
+```
+
+## Fluxos de Trabalho
+
+### **Desenvolvimento (LocalStack)**
+```bash
+# 1. Iniciar LocalStack
+docker-compose up localstack -d
+
+# 2. Criar recursos de exemplo
+./scripts/localstack/setup.sh
+
+# 3. Executar aplicação
+dotnet run --environment LocalStack
+
+# 4. Acessar: http://localhost:8080
+```
+
+**Resultado:**
+- **Modo Completo**: Criar, editar, excluir recursos
+- **Dados de Exemplo**: Buckets, filas, tópicos, secrets
+- **Ambiente Seguro**: Não afeta AWS real
+
+### **Produção (AWS Real)**
+```bash
+# 1. Configurar credenciais AWS
+aws configure
+
+# 2. Atualizar appsettings.Production.json
+# (Copiar credenciais do aws configure)
+
+# 3. Executar aplicação
+dotnet run --environment Production
+
+# 4. Acessar: http://localhost:8080
+```
+
+**Resultado:**
+- ⚠️ **Modo ReadOnly**: Apenas visualização
+- ⚠️ **Recursos Reais**: Sua conta AWS
+- ⚠️ **Segurança**: Botões desabilitados
+
+### **Docker (Completo)**
+```bash
+# 1. Executar tudo
+docker-compose up
+
+# 2. Acessar: http://localhost:8080
+```
+
+**Resultado:**
+- **LocalStack + Visualizer**: Ambiente completo
+- **Recursos Automáticos**: Criados automaticamente
+- **Pronto para Usar**: Sem configuração adicional
+
+## Logs
+
+A aplicação usa Serilog para logging estruturado. Logs importantes:
+
+- `[INFO] Processamento SQS concluído. X filas processadas com sucesso`
+- `[ERROR] Erro ao obter detalhes da fila, parando processamento`
+- `[WARN] Tentativa X/Y falhou para operação, tentando novamente`
+
+## Contribuição
+
+1. Fork o projeto
+2. Crie uma branch para sua feature
+3. Commit suas mudanças
+4. Push para a branch
+5. Abra um Pull Request
+
+## Licença
+
+Este projeto está sob a licença MIT. Veja o arquivo LICENSE para detalhes.

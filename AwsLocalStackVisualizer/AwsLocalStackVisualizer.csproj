@@ -16,6 +16,11 @@
     <PackageReference Include="Serilog.Enrichers.Process" Version="3.0.0" />
     <PackageReference Include="Serilog.Enrichers.Thread" Version="4.0.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+    <PackageReference Include="Markdig" Version="0.37.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\README.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

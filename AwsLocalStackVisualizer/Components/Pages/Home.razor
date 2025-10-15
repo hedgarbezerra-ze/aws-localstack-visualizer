@@ -1,50 +1,556 @@
 ﻿@page "/"
+@using AwsLocalStackVisualizer.Abstractions
+@using AwsLocalStackVisualizer.Models.Dashboard
+@using AwsLocalStackVisualizer.Models.S3
+@using AwsLocalStackVisualizer.Models.SQS
+@using AwsLocalStackVisualizer.Models.SNS
+@using AwsLocalStackVisualizer.Models.SecretsManager
+@using AwsLocalStackVisualizer.Services
+@inject ILocalStackService LocalStackService
+@inject IJSRuntime JSRuntime
+@rendermode InteractiveServer
 
 <PageTitle>LocalStack Visualizer</PageTitle>
 
 <div class="container-fluid">
-    <div class="row justify-content-center">
-        <div class="col-md-8 text-center">
-            <h1 class="display-3 mb-4">LocalStack Visualizer</h1>
-            <p class="lead mb-4">
-                Visualize e gerencie seus recursos AWS LocalStack de forma simples e intuitiva.
-            </p>
-            
-            <div class="row mb-5">
-                <div class="col-md-4 mb-3">
-                    <div class="card h-100">
-                        <div class="card-body">
-                            <i class="bi bi-cloud-upload fs-1 text-primary mb-3"></i>
-                            <h5 class="card-title">Amazon S3</h5>
-                            <p class="card-text">Gerencie buckets e objetos S3</p>
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1 class="display-4">LocalStack Visualizer</h1>
+            <p class="lead">Visão geral dos serviços AWS LocalStack</p>
+            <hr />
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <small class="text-muted">Última atualização: @lastUpdated.ToString("dd/MM/yyyy HH:mm:ss")</small>
+                <button class="btn btn-outline-primary btn-sm" @onclick="LoadAllServicesAsync">
+                    <i class="bi bi-arrow-clockwise"></i> Atualizar
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="bi bi-cloud-upload text-primary"></i> Simple Storage Service
+                    </h5>
+                    @if (isLoadingS3)
+                    {
+                        <div class="spinner-border spinner-border-sm text-primary" role="status">
+                            <span class="visually-hidden">Carregando...</span>
                         </div>
-                    </div>
+                    }
+                    else
+                    {
+                        <span class="badge bg-@(s3Data?.IsHealthy == true ? "success" : "danger")">
+                            @(s3Data?.IsHealthy == true ? "Ativo" : "Inativo")
+                        </span>
+                    }
                 </div>
-                <div class="col-md-4 mb-3">
-                    <div class="card h-100">
-                        <div class="card-body">
-                            <i class="bi bi-list-ul fs-1 text-success mb-3"></i>
-                            <h5 class="card-title">Amazon SQS</h5>
-                            <p class="card-text">Visualize filas e mensagens</p>
+                <div class="card-body">
+                    @if (isLoadingS3)
+                    {
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Carregando dados do S3...</span>
+                            </div>
+                            <p class="mt-2 text-muted">Carregando dados do S3...</p>
                         </div>
-                    </div>
-                </div>
-                <div class="col-md-4 mb-3">
-                    <div class="card h-100">
-                        <div class="card-body">
-                            <i class="bi bi-megaphone fs-1 text-warning mb-3"></i>
-                            <h5 class="card-title">Amazon SNS</h5>
-                            <p class="card-text">Monitore tópicos e assinaturas</p>
+                    }
+                    else
+                    {
+                        <div class="row">
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <h3 class="text-primary">@(s3Data?.BucketCount ?? 0)</h3>
+                                    <small class="text-muted">Buckets</small>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <h3 class="text-info">@(s3Data?.ObjectCount ?? 0)</h3>
+                                    <small class="text-muted">Objetos</small>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <h3 class="text-warning">@FormatBytes(s3Data?.TotalSize ?? 0)</h3>
+                                    <small class="text-muted">Tamanho Total</small>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <button class="btn btn-primary" @onclick='() => NavigateToService("s3")'>
+                                        <i class="bi bi-eye"></i> Visualizar
+                                    </button>
+                                </div>
+                            </div>
                         </div>
-                    </div>
+                    }
                 </div>
             </div>
+        </div>
+    </div>
 
-            <div class="d-grid gap-2 d-md-block">
-                <a href="/dashboard" class="btn btn-primary btn-lg">
-                    <i class="bi bi-speedometer2"></i> Acessar Dashboard
-                </a>
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="bi bi-list-ul text-success"></i> Simple Queue Service
+                    </h5>
+                    @if (isLoadingSqs)
+                    {
+                        <div class="spinner-border spinner-border-sm text-success" role="status">
+                            <span class="visually-hidden">Carregando...</span>
+                        </div>
+                    }
+                    else
+                    {
+                        <span class="badge bg-@(sqsData?.IsHealthy == true ? "success" : "danger")">
+                            @(sqsData?.IsHealthy == true ? "Ativo" : "Inativo")
+                        </span>
+                    }
+                </div>
+                <div class="card-body">
+                    @if (isLoadingSqs)
+                    {
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-success" role="status">
+                                <span class="visually-hidden">Carregando dados do SQS...</span>
+                            </div>
+                            <p class="mt-2 text-muted">Carregando dados do SQS...</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="row">
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <h3 class="text-success">@(sqsData?.QueueCount ?? 0)</h3>
+                                    <small class="text-muted">Filas</small>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <h3 class="text-info">@(sqsData?.TotalMessages ?? 0)</h3>
+                                    <small class="text-muted">Mensagens</small>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <h3 class="text-warning">@(sqsData?.VisibleMessages ?? 0)</h3>
+                                    <small class="text-muted">Visíveis</small>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <button class="btn btn-success" @onclick='() => NavigateToService("sqs")'>
+                                        <i class="bi bi-eye"></i> Visualizar
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="bi bi-megaphone text-warning"></i> Simple Notification Service
+                    </h5>
+                    @if (isLoadingSns)
+                    {
+                        <div class="spinner-border spinner-border-sm text-warning" role="status">
+                            <span class="visually-hidden">Carregando...</span>
+                        </div>
+                    }
+                    else
+                    {
+                        <span class="badge bg-@(snsData?.IsHealthy == true ? "success" : "danger")">
+                            @(snsData?.IsHealthy == true ? "Ativo" : "Inativo")
+                        </span>
+                    }
+                </div>
+                <div class="card-body">
+                    @if (isLoadingSns)
+                    {
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-warning" role="status">
+                                <span class="visually-hidden">Carregando dados do SNS...</span>
+                            </div>
+                            <p class="mt-2 text-muted">Carregando dados do SNS...</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="text-center">
+                                    <h3 class="text-warning">@(snsData?.TopicCount ?? 0)</h3>
+                                    <small class="text-muted">Tópicos</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="text-center">
+                                    <h3 class="text-info">@(snsData?.SubscriptionCount ?? 0)</h3>
+                                    <small class="text-muted">Assinaturas</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="text-center">
+                                    <button class="btn btn-warning" @onclick='() => NavigateToService("sns")'>
+                                        <i class="bi bi-eye"></i> Visualizar
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="bi bi-key text-danger"></i> Secrets Manager
+                    </h5>
+                    @if (isLoadingSecrets)
+                    {
+                        <div class="spinner-border spinner-border-sm text-danger" role="status">
+                            <span class="visually-hidden">Carregando...</span>
+                        </div>
+                    }
+                    else
+                    {
+                        <span class="badge bg-@(secretsData?.IsHealthy == true ? "success" : "danger")">
+                            @(secretsData?.IsHealthy == true ? "Ativo" : "Inativo")
+                        </span>
+                    }
+                </div>
+                <div class="card-body">
+                    @if (isLoadingSecrets)
+                    {
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-danger" role="status">
+                                <span class="visually-hidden">Carregando dados do Secrets Manager...</span>
+                            </div>
+                            <p class="mt-2 text-muted">Carregando dados do Secrets Manager...</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="text-center">
+                                    <h3 class="text-danger">@(secretsData?.SecretCount ?? 0)</h3>
+                                    <small class="text-muted">Secrets</small>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="text-center">
+                                    <button class="btn btn-danger" @onclick='() => NavigateToService("secrets")'>
+                                        <i class="bi bi-eye"></i> Visualizar
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
             </div>
         </div>
     </div>
 </div>
+
+@code {
+    private S3ServiceData? s3Data;
+    private SqsServiceData? sqsData;
+    private SnsServiceData? snsData;
+    private SecretsServiceData? secretsData;
+    
+    private bool isLoadingS3 = true;
+    private bool isLoadingSqs = true;
+    private bool isLoadingSns = true;
+    private bool isLoadingSecrets = true;
+    
+    private DateTime lastUpdated = DateTime.Now;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAllServicesDataAsync();
+    }
+
+    private async Task LoadAllServicesDataAsync()
+    {
+        lastUpdated = DateTime.Now;
+        
+        isLoadingS3 = true;
+        isLoadingSqs = true;
+        isLoadingSns = true;
+        isLoadingSecrets = true;
+        StateHasChanged();
+        
+        var s3Task = LoadS3DataStreamAsync();
+        var sqsTask = LoadSqsDataStreamAsync();
+        var snsTask = LoadSnsDataStreamAsync();
+        var secretsTask = LoadSecretsDataStreamAsync();
+        
+        await Task.WhenAll(s3Task, sqsTask, snsTask, secretsTask);
+    }
+
+    private async Task LoadS3DataStreamAsync()
+    {
+        try
+        {
+            var buckets = new List<S3BucketInfo>();
+            await foreach (var bucket in LocalStackService.GetS3BucketsStreamAsync())
+            {
+                buckets.Add(bucket);
+            }
+            
+            var totalObjects = buckets.Sum(b => b.ObjectCount);
+            var totalSize = buckets.Sum(b => b.TotalSize);
+            s3Data = new S3ServiceData(true, buckets.Count, totalObjects, totalSize);
+        }
+        catch
+        {
+            s3Data = new S3ServiceData(false, 0, 0, 0);
+        }
+        finally
+        {
+            isLoadingS3 = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task LoadSqsDataStreamAsync()
+    {
+        try
+        {
+            var queues = new List<SqsQueueInfo>();
+            await foreach (var queue in LocalStackService.GetSqsQueuesStreamAsync())
+            {
+                queues.Add(queue);
+            }
+            
+            var totalMessages = queues.Sum(q => q.ApproximateNumberOfMessages);
+            var visibleMessages = queues.Sum(q => q.ApproximateNumberOfMessages - q.ApproximateNumberOfMessagesNotVisible);
+            sqsData = new SqsServiceData(true, queues.Count, totalMessages, visibleMessages);
+        }
+        catch
+        {
+            sqsData = new SqsServiceData(false, 0, 0, 0);
+        }
+        finally
+        {
+            isLoadingSqs = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task LoadSnsDataStreamAsync()
+    {
+        try
+        {
+            var topics = new List<SnsTopicInfo>();
+            await foreach (var topic in LocalStackService.GetSnsTopicsStreamAsync())
+            {
+                topics.Add(topic);
+            }
+            
+            var totalSubscriptions = topics.Sum(t => t.SubscriptionsCount);
+            snsData = new SnsServiceData(true, topics.Count, totalSubscriptions);
+        }
+        catch
+        {
+            snsData = new SnsServiceData(false, 0, 0);
+        }
+        finally
+        {
+            isLoadingSns = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task LoadSecretsDataStreamAsync()
+    {
+        try
+        {
+            var secrets = new List<SecretInfo>();
+            await foreach (var secret in LocalStackService.GetSecretsStreamAsync())
+            {
+                secrets.Add(secret);
+            }
+            
+            secretsData = new SecretsServiceData(true, secrets.Count);
+        }
+        catch
+        {
+            secretsData = new SecretsServiceData(false, 0);
+        }
+        finally
+        {
+            isLoadingSecrets = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task LoadAllServicesAsync()
+    {
+        await LoadAllServicesDataAsync();
+    }
+
+    private async Task LoadS3DataAsync()
+    {
+        try
+        {
+            var bucketsResult = await LocalStackService.GetS3BucketsAsync();
+            if (bucketsResult.IsSuccess)
+            {
+                var buckets = bucketsResult.Data ?? new List<S3BucketInfo>();
+                var totalObjects = buckets.Sum(b => b.ObjectCount);
+                var totalSize = buckets.Sum(b => b.TotalSize);
+                s3Data = new S3ServiceData(true, buckets.Count, totalObjects, totalSize);
+            }
+            else
+            {
+                s3Data = new S3ServiceData(false, 0, 0, 0);
+            }
+        }
+        catch
+        {
+            s3Data = new S3ServiceData(false, 0, 0, 0);
+        }
+        finally
+        {
+            isLoadingS3 = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task LoadSqsDataAsync()
+    {
+        try
+        {
+            var queuesResult = await LocalStackService.GetSqsQueuesAsync();
+            if (queuesResult.IsSuccess)
+            {
+                var queues = queuesResult.Data ?? new List<SqsQueueInfo>();
+                var totalMessages = queues.Sum(q => q.ApproximateNumberOfMessages);
+                var visibleMessages = queues.Sum(q => q.ApproximateNumberOfMessages - q.ApproximateNumberOfMessagesNotVisible);
+                sqsData = new SqsServiceData(true, queues.Count, totalMessages, visibleMessages);
+            }
+            else
+            {
+                sqsData = new SqsServiceData(false, 0, 0, 0);
+            }
+        }
+        catch
+        {
+            sqsData = new SqsServiceData(false, 0, 0, 0);
+        }
+        finally
+        {
+            isLoadingSqs = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task LoadSnsDataAsync()
+    {
+        try
+        {
+            var topicsResult = await LocalStackService.GetSnsTopicsAsync();
+            if (topicsResult.IsSuccess)
+            {
+                var topics = topicsResult.Data ?? new List<SnsTopicInfo>();
+                var totalSubscriptions = topics.Sum(t => t.SubscriptionsCount);
+                snsData = new SnsServiceData(true, topics.Count, totalSubscriptions);
+            }
+            else
+            {
+                snsData = new SnsServiceData(false, 0, 0);
+            }
+        }
+        catch
+        {
+            snsData = new SnsServiceData(false, 0, 0);
+        }
+        finally
+        {
+            isLoadingSns = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task LoadSecretsDataAsync()
+    {
+        try
+        {
+            var secretsResult = await LocalStackService.GetSecretsAsync();
+            if (secretsResult.IsSuccess)
+            {
+                var secrets = secretsResult.Data ?? new List<SecretInfo>();
+                secretsData = new SecretsServiceData(true, secrets.Count);
+            }
+            else
+            {
+                secretsData = new SecretsServiceData(false, 0);
+            }
+        }
+        catch
+        {
+            secretsData = new SecretsServiceData(false, 0);
+        }
+        finally
+        {
+            isLoadingSecrets = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private string FormatBytes(long bytes)
+    {
+        if (bytes == 0) return "0 B";
+        
+        string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+        int order = 0;
+        double size = bytes;
+        
+        while (size >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            size /= 1024;
+        }
+        
+        return $"{size:0.##} {sizes[order]}";
+    }
+
+    private async Task NavigateToService(string serviceName)
+    {
+        var url = serviceName.ToLower() switch
+        {
+            "s3" => "/s3",
+            "sqs" => "/sqs",
+            "sns" => "/sns",
+            "secrets" => "/secrets",
+            "secretsmanager" => "/secrets", // Mantém compatibilidade
+            _ => "/"
+        };
+
+        await JSRuntime.InvokeVoidAsync("eval", $"window.location.href = '{url}'");
+    }
+}

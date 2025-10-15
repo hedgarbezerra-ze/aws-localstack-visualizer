@@ -1,6 +1,9 @@
 using Amazon.SQS;
 using Amazon.SQS.Model;
-using AwsLocalStackVisualizer.Models;
+using AwsLocalStackVisualizer.Abstractions;
+using AwsLocalStackVisualizer.Models.Common;
+using AwsLocalStackVisualizer.Models.SQS;
+using System.Runtime.CompilerServices;
 
 namespace AwsLocalStackVisualizer.Services.AWS;
 
@@ -12,9 +15,9 @@ public class SqsService : ISqsService
 
     public SqsService(AmazonSQSClient sqsClient, ILogger<SqsService> logger, INotificationService notificationService)
     {
-        _sqsClient = sqsClient;
-        _logger = logger;
-        _notificationService = notificationService;
+        _sqsClient = sqsClient ?? throw new ArgumentNullException(nameof(sqsClient));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
     }
 
     public async Task<OperationResult<IReadOnlyList<SqsQueueInfo>>> GetQueuesAsync()
@@ -22,32 +25,132 @@ public class SqsService : ISqsService
         try
         {
             var response = await _sqsClient.ListQueuesAsync(new ListQueuesRequest());
-            var queues = new List<SqsQueueInfo>();
-
-            foreach (var queueUrl in response.QueueUrls)
+            
+            if (response is not { QueueUrls: { } queueUrlsList })
             {
-                var queueName = queueUrl.Split('/').Last();
-                var attributes = await _sqsClient.GetQueueAttributesAsync(queueUrl, new List<string> 
-                { 
-                    "ApproximateNumberOfMessages", 
-                    "ApproximateNumberOfMessagesNotVisible",
-                    "CreatedTimestamp"
-                });
-
-                var messageCount = int.Parse(attributes.Attributes.GetValueOrDefault("ApproximateNumberOfMessages", "0"));
-                var notVisibleCount = int.Parse(attributes.Attributes.GetValueOrDefault("ApproximateNumberOfMessagesNotVisible", "0"));
-                var createdTimestamp = DateTimeOffset.FromUnixTimeSeconds(long.Parse(attributes.Attributes.GetValueOrDefault("CreatedTimestamp", "0"))).DateTime;
-
-                queues.Add(new SqsQueueInfo(queueName, queueUrl, messageCount, notVisibleCount, createdTimestamp));
+                _logger.LogWarning("Resposta do SQS ListQueues é nula ou não contém URLs de filas");
+                return new OperationResult<IReadOnlyList<SqsQueueInfo>>(true, []);
             }
+
+            var queueTasks = new List<Task<SqsQueueInfo?>>();
+
+            foreach (var queueUrl in queueUrlsList)
+            {
+                if (string.IsNullOrWhiteSpace(queueUrl))
+                {
+                    _logger.LogWarning("URL de fila inválida encontrada, ignorando");
+                    continue;
+                }
+
+                queueTasks.Add(GetQueueInfoAsync(queueUrl));
+            }
+
+            var queueResults = await Task.WhenAll(queueTasks);
+            var queues = queueResults.Where(q => q is not null).Cast<SqsQueueInfo>().ToList();
 
             return new OperationResult<IReadOnlyList<SqsQueueInfo>>(true, queues);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao listar filas SQS");
-            _notificationService.ShowError($"Erro ao carregar filas SQS: {ex.Message}");
-            return new OperationResult<IReadOnlyList<SqsQueueInfo>>(false, Array.Empty<SqsQueueInfo>(), ex.Message, ex);
+            return new OperationResult<IReadOnlyList<SqsQueueInfo>>(false, [], ex.Message, ex);
+        }
+    }
+
+    public async IAsyncEnumerable<SqsQueueInfo> GetQueuesStreamAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        List<Task<SqsQueueInfo?>> validQueues;
+        try
+        {
+            var response = await _sqsClient.ListQueuesAsync(new ListQueuesRequest());
+            
+            if (response is not { QueueUrls: { } queueUrlsList })
+            {
+                _logger.LogWarning("Resposta do SQS ListQueues é nula ou não contém URLs de filas");
+                yield break;
+            }
+
+            validQueues = queueUrlsList
+                .Where(queueUrl => !string.IsNullOrWhiteSpace(queueUrl))
+                .Select(queueUrl => GetQueueInfoAsync(queueUrl))
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao listar filas SQS");
+            yield break;
+        }
+
+        await foreach (var queueInfo in ProcessQueuesSafelyAsync(validQueues, cancellationToken))
+        {
+            yield return queueInfo;
+        }
+    }
+
+    private async IAsyncEnumerable<SqsQueueInfo> ProcessQueuesSafelyAsync(List<Task<SqsQueueInfo?>> queueTasks, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        foreach (var queueTask in queueTasks)
+        {
+            if (cancellationToken.IsCancellationRequested)
+                yield break;
+
+            var queueInfo = await GetQueueInfoSafelyAsync(queueTask);
+            if (queueInfo is not null)
+            {
+                yield return queueInfo;
+            }
+        }
+    }
+
+    private async Task<SqsQueueInfo?> GetQueueInfoAsync(string queueUrl)
+    {
+        try
+        {
+            var queueName = queueUrl.Split('/').LastOrDefault();
+            if (string.IsNullOrWhiteSpace(queueName))
+            {
+                _logger.LogWarning("Nome de fila não pôde ser extraído da URL {QueueUrl}, ignorando", queueUrl);
+                return null;
+            }
+
+            var attributes = await _sqsClient.GetQueueAttributesAsync(queueUrl, new List<string> 
+            { 
+                "ApproximateNumberOfMessages", 
+                "ApproximateNumberOfMessagesNotVisible",
+                "CreatedTimestamp"
+            });
+
+            if (attributes is not { Attributes: { } attributeDict })
+            {
+                _logger.LogWarning("Atributos da fila {QueueName} não puderam ser obtidos, usando valores padrão", queueName);
+                return new SqsQueueInfo(queueName, queueUrl, 0, 0, DateTime.MinValue);
+            }
+
+            var messageCount = int.TryParse(attributeDict.GetValueOrDefault("ApproximateNumberOfMessages", "0"), out var msgCount) ? msgCount : 0;
+            var notVisibleCount = int.TryParse(attributeDict.GetValueOrDefault("ApproximateNumberOfMessagesNotVisible", "0"), out var notVisCount) ? notVisCount : 0;
+            var createdTimestamp = long.TryParse(attributeDict.GetValueOrDefault("CreatedTimestamp", "0"), out var timestamp) && timestamp > 0
+                ? DateTimeOffset.FromUnixTimeSeconds(timestamp).DateTime
+                : DateTime.MinValue;
+
+            return new SqsQueueInfo(queueName, queueUrl, messageCount, notVisibleCount, createdTimestamp);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Erro ao obter detalhes da fila {QueueUrl}, ignorando", queueUrl);
+            return null;
+        }
+    }
+
+    private async Task<SqsQueueInfo?> GetQueueInfoSafelyAsync(Task<SqsQueueInfo?> queueTask)
+    {
+        try
+        {
+            return await queueTask;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Erro ao obter informações da fila");
+            return null;
         }
     }
 
@@ -64,7 +167,7 @@ public class SqsService : ISqsService
             if (queueInfo == null)
             {
                 var defaultQueue = new SqsQueueInfo(queueName, "", 0, 0, DateTime.MinValue);
-                return new OperationResult<SqsQueueDetails>(true, new SqsQueueDetails(defaultQueue, Array.Empty<SqsMessageInfo>()));
+                return new OperationResult<SqsQueueDetails>(true, new SqsQueueDetails(defaultQueue, []));
             }
 
             var messages = new List<SqsMessageInfo>();
@@ -76,19 +179,35 @@ public class SqsService : ISqsService
                 MessageSystemAttributeNames = new List<string> { "All" },
                 MessageAttributeNames = new List<string> { "All" }
             });
+            
+            if (response is { Messages: null  or { Count: 0 } })
+                return new OperationResult<SqsQueueDetails>(true, 
+                    new SqsQueueDetails(queueInfo, []),
+                    "Fila '{queueName}' está vazia ou não pôde ser lida");
 
             foreach (var message in response.Messages)
             {
-                var sentTimestamp = DateTime.UnixEpoch.AddMilliseconds(long.Parse(message.Attributes.GetValueOrDefault("SentTimestamp", "0")));
-                var receiveCount = int.Parse(message.Attributes.GetValueOrDefault("ApproximateReceiveCount", "0"));
+                if (message is null or { MessageId: null or "" })
+                {
+                    _logger.LogWarning("Mensagem inválida encontrada na fila {QueueName}, ignorando", queueName);
+                    continue;
+                }
+
+                var sentTimestamp = message.Attributes?.GetValueOrDefault("SentTimestamp") is { } sentStr && long.TryParse(sentStr, out var sentLong)
+                    ? DateTime.UnixEpoch.AddMilliseconds(sentLong)
+                    : DateTime.UnixEpoch;
+
+                var receiveCount = message.Attributes?.GetValueOrDefault("ApproximateReceiveCount") is { } countStr && int.TryParse(countStr, out var count)
+                    ? count
+                    : 0;
 
                 messages.Add(new SqsMessageInfo(
                     message.MessageId,
-                    message.Body,
-                    message.ReceiptHandle,
+                    message.Body ?? string.Empty,
+                    message.ReceiptHandle ?? string.Empty,
                     sentTimestamp,
                     receiveCount,
-                    message.Attributes
+                    message.Attributes ?? new Dictionary<string, string>()
                 ));
             }
 
@@ -97,9 +216,8 @@ public class SqsService : ISqsService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao obter detalhes da fila {QueueName}", queueName);
-            _notificationService.ShowError($"Erro ao carregar detalhes da fila: {ex.Message}");
             var defaultQueue = new SqsQueueInfo(queueName, "", 0, 0, DateTime.MinValue);
-            return new OperationResult<SqsQueueDetails>(false, new SqsQueueDetails(defaultQueue, Array.Empty<SqsMessageInfo>()), ex.Message, ex);
+            return new OperationResult<SqsQueueDetails>(false, new SqsQueueDetails(defaultQueue, []), ex.Message, ex);
         }
     }
 
@@ -126,7 +244,6 @@ public class SqsService : ISqsService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao criar fila SQS {QueueName}", queueName);
-            _notificationService.ShowError($"Erro ao criar fila: {ex.Message}");
             return new OperationResult<string>(false, null, ex.Message, ex);
         }
     }
@@ -161,7 +278,6 @@ public class SqsService : ISqsService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao enviar mensagem para fila SQS {QueueUrl}", queueUrl);
-            _notificationService.ShowError($"Erro ao enviar mensagem: {ex.Message}");
             return new OperationResult<string>(false, null, ex.Message, ex);
         }
     }
@@ -179,7 +295,6 @@ public class SqsService : ISqsService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao excluir fila SQS {QueueUrl}", queueUrl);
-            _notificationService.ShowError($"Erro ao excluir fila: {ex.Message}");
             return new OperationResult<bool>(false, false, ex.Message, ex);
         }
     }
@@ -197,7 +312,6 @@ public class SqsService : ISqsService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao limpar fila SQS {QueueUrl}", queueUrl);
-            _notificationService.ShowError($"Erro ao limpar fila: {ex.Message}");
             return new OperationResult<bool>(false, false, ex.Message, ex);
         }
     }

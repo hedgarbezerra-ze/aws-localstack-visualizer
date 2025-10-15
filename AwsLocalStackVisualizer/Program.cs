@@ -1,14 +1,12 @@
-using Amazon;
 using Amazon.S3;
 using Amazon.SQS;
 using Amazon.SimpleNotificationService;
 using Amazon.SecretsManager;
-using Amazon.Runtime;
+using AwsLocalStackVisualizer.Abstractions;
 using AwsLocalStackVisualizer.Components;
 using AwsLocalStackVisualizer.Configuration;
 using AwsLocalStackVisualizer.Services;
 using AwsLocalStackVisualizer.Services.AWS;
-using AwsLocalStackVisualizer.Extensions;
 using AwsLocalStackVisualizer.Handlers;
 using Serilog;
 
@@ -17,94 +15,50 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseSerilog((context, configuration) =>
     configuration.ReadFrom.Configuration(context.Configuration));
 
-builder.Services.Configure<LocalStackConfiguration>(
-    builder.Configuration.GetSection("LocalStack"));
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.AddProblemDetails();
+
+builder.Services.Configure<AwsConfiguration>(
+    builder.Configuration.GetSection("AWS"));
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-var localStackConfig = builder.Configuration.GetSection("LocalStack").Get<LocalStackConfiguration>() ?? new LocalStackConfiguration();
+var awsConfig = builder.Configuration.GetSection("AWS").Get<AwsConfiguration>() ?? new AwsConfiguration();
 
 using var loggerFactory = LoggerFactory.Create(builder => builder.AddSerilog());
-var logger = loggerFactory.CreateLogger("LocalStack.Configuration");
+var logger = loggerFactory.CreateLogger("AWS.Configuration");
 
-AWSCredentials credentials;
-if (localStackConfig.UseAnonymousCredentials)
-{
-    credentials = new AnonymousAWSCredentials();
-    logger.LogInformation("Configurando LocalStack com credenciais anônimas");
-}
-else
-{
-    // Usar credenciais "test" conforme documentação do LocalStack
-    credentials = new BasicAWSCredentials("test", "test");
-    logger.LogInformation("Configurando LocalStack com credenciais básicas (test/test)");
-}
+var credentials = AwsCredentialsFactory.CreateCredentials(awsConfig, logger);
 
 builder.Services.AddSingleton(credentials);
+
 builder.Services.AddSingleton<AmazonS3Client>(provider =>
 {
-    // Configuração S3 seguindo documentação oficial do LocalStack
-    // https://docs.localstack.cloud/aws/integrations/aws-sdks/net/#s3-specific-endpoint
-    var config = new AmazonS3Config
-    {
-        ServiceURL = localStackConfig.ServiceUrl,
-        ForcePathStyle = true,
-        UseHttp = localStackConfig.ServiceUrl.StartsWith("http://"),
-        AuthenticationRegion = localStackConfig.Region
-    };
-    var s3Client = new AmazonS3Client(credentials, config);
-    
-    // Garantir que buckets essenciais existam (apenas em desenvolvimento)
-    if (LocalStackExtensions.IsDevelopment())
-    {
-        Task.Run(async () =>
-        {
-            var s3Logger = loggerFactory.CreateLogger("LocalStack.S3.Initialization");
-            s3Logger.LogInformation("Inicializando buckets essenciais para desenvolvimento");
-            
-            await s3Client.EnsureBucketExistsAsync("sample-bucket");
-            await s3Client.EnsureBucketExistsAsync("logs-bucket");
-            await s3Client.EnsureBucketExistsAsync("uploads-bucket");
-            
-            s3Logger.LogInformation("Inicialização de buckets concluída");
-        });
-    }
-    
+    var s3Client = AwsClientFactory.CreateS3Client(credentials, awsConfig);
+    logger.LogInformation("S3 Client configurado para {Environment}", awsConfig.UseLocalStack ? "LocalStack" : "AWS Real");
     return s3Client;
 });
 
 builder.Services.AddSingleton<AmazonSQSClient>(provider =>
 {
-    var config = new AmazonSQSConfig
-    {
-        ServiceURL = localStackConfig.ServiceUrl,
-        UseHttp = localStackConfig.ServiceUrl.StartsWith("http://"),
-        AuthenticationRegion = localStackConfig.Region
-    };
-    return new AmazonSQSClient(credentials, config);
+    var sqsClient = AwsClientFactory.CreateSqsClient(credentials, awsConfig);
+    logger.LogInformation("SQS Client configurado para {Environment}", awsConfig.UseLocalStack ? "LocalStack" : "AWS Real");
+    return sqsClient;
 });
 
 builder.Services.AddSingleton<AmazonSimpleNotificationServiceClient>(provider =>
 {
-    var config = new AmazonSimpleNotificationServiceConfig
-    {
-        ServiceURL = localStackConfig.ServiceUrl,
-        UseHttp = localStackConfig.ServiceUrl.StartsWith("http://"),
-        AuthenticationRegion = localStackConfig.Region
-    };
-    return new AmazonSimpleNotificationServiceClient(credentials, config);
+    var snsClient = AwsClientFactory.CreateSnsClient(credentials, awsConfig);
+    logger.LogInformation("SNS Client configurado para {Environment}", awsConfig.UseLocalStack ? "LocalStack" : "AWS Real");
+    return snsClient;
 });
 
 builder.Services.AddSingleton<AmazonSecretsManagerClient>(provider =>
 {
-    var config = new AmazonSecretsManagerConfig
-    {
-        ServiceURL = localStackConfig.ServiceUrl,
-        UseHttp = localStackConfig.ServiceUrl.StartsWith("http://"),
-        AuthenticationRegion = localStackConfig.Region
-    };
-    return new AmazonSecretsManagerClient(credentials, config);
+    var secretsClient = AwsClientFactory.CreateSecretsManagerClient(credentials, awsConfig);
+    logger.LogInformation("SecretsManager Client configurado para {Environment}", awsConfig.UseLocalStack ? "LocalStack" : "AWS Real");
+    return secretsClient;
 });
 
 builder.Services.AddScoped<IS3Service, S3Service>();
@@ -115,10 +69,12 @@ builder.Services.AddScoped<ISecretsManagerService, SecretsManagerService>();
 builder.Services.AddScoped<ILocalStackService, LocalStackService>();
 
 builder.Services.AddScoped<INotificationService, NotificationService>();
+builder.Services.AddScoped<IReadOnlyService, ReadOnlyService>();
+builder.Services.AddSingleton<ICacheService, CacheService>();
 
-builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
-builder.Services.AddProblemDetails();
 builder.Services.AddHealthChecks();
+
+builder.WebHost.UseStaticWebAssets();
 
 var app = builder.Build();
 
@@ -139,13 +95,12 @@ app.UseExceptionHandler();
 
 if (!app.Environment.IsDevelopment())
 {
-     app.UseHsts();
+    app.UseHsts();
 }
 
 app.UseHttpsRedirection();
-
-
 app.UseAntiforgery();
+app.UseStaticFiles();
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()

@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Diagnostics;
-using Microsoft.AspNetCore.Mvc;
 using System.Net;
 
 namespace AwsLocalStackVisualizer.Handlers;
@@ -18,11 +17,25 @@ public class GlobalExceptionHandler : IExceptionHandler
         Exception exception, 
         CancellationToken cancellationToken)
     {
-        _logger.LogError(exception, "Ocorreu uma exceção não tratada: {Message}", exception.Message);
+        _logger.LogError(exception, 
+            "Exceção capturada pelo GlobalExceptionHandler: {Message} | Path: {Path} | Method: {Method} | UserAgent: {UserAgent}", 
+            exception.Message,
+            httpContext.Request.Path,
+            httpContext.Request.Method,
+            httpContext.Request.Headers.UserAgent.FirstOrDefault());
 
-        var problemDetails = CreateProblemDetails(httpContext, exception);
+        var statusCode = GetStatusCode(exception);
+        var problemDetails = new
+        {
+            Status = statusCode,
+            Title = GetTitle(exception),
+            Detail = GetDetail(exception),
+            Type = GetType(exception),
+            Instance = httpContext.Request.Path,
+            TraceId = httpContext.TraceIdentifier
+        };
         
-        httpContext.Response.StatusCode = problemDetails.Status ?? (int)HttpStatusCode.InternalServerError;
+        httpContext.Response.StatusCode = statusCode;
         httpContext.Response.ContentType = "application/problem+json";
 
         await httpContext.Response.WriteAsJsonAsync(problemDetails, cancellationToken);
@@ -30,90 +43,63 @@ public class GlobalExceptionHandler : IExceptionHandler
         return true;
     }
 
-    private static ProblemDetails CreateProblemDetails(HttpContext context, Exception exception)
+    private static int GetStatusCode(Exception exception)
     {
         return exception switch
         {
-            ArgumentNullException nullEx => new ProblemDetails
-            {
-                Status = (int)HttpStatusCode.BadRequest,
-                Title = "Parâmetro obrigatório não informado",
-                Detail = $"O parâmetro '{nullEx.ParamName}' é obrigatório",
-                Instance = context.Request.Path,
-                Type = "https://tools.ietf.org/html/rfc7231#section-6.5.1"
-            },
-            
-            ArgumentException argEx => new ProblemDetails
-            {
-                Status = (int)HttpStatusCode.BadRequest,
-                Title = "Parâmetro inválido",
-                Detail = argEx.Message,
-                Instance = context.Request.Path,
-                Type = "https://tools.ietf.org/html/rfc7231#section-6.5.1"
-            },
-            
-            UnauthorizedAccessException => new ProblemDetails
-            {
-                Status = (int)HttpStatusCode.Unauthorized,
-                Title = "Acesso negado",
-                Detail = "Você não tem permissão para acessar este recurso",
-                Instance = context.Request.Path,
-                Type = "https://tools.ietf.org/html/rfc7235#section-3.1"
-            },
-            
-            TimeoutException => new ProblemDetails
-            {
-                Status = (int)HttpStatusCode.RequestTimeout,
-                Title = "Timeout na operação",
-                Detail = "A operação excedeu o tempo limite permitido",
-                Instance = context.Request.Path,
-                Type = "https://tools.ietf.org/html/rfc7231#section-6.5.7"
-            },
-            
-            HttpRequestException httpEx => new ProblemDetails
-            {
-                Status = (int)HttpStatusCode.BadGateway,
-                Title = "Erro de comunicação",
-                Detail = $"Falha na comunicação com o serviço externo: {httpEx.Message}",
-                Instance = context.Request.Path,
-                Type = "https://tools.ietf.org/html/rfc7231#section-6.6.3"
-            },
-            
-            Amazon.Runtime.AmazonServiceException awsEx when awsEx.Message.Contains("Authentication Token") => new ProblemDetails
-            {
-                Status = (int)HttpStatusCode.Unauthorized,
-                Title = "Erro de autenticação AWS",
-                Detail = "Falha na autenticação com LocalStack. Verifique as credenciais AWS configuradas.",
-                Instance = context.Request.Path,
-                Type = "https://tools.ietf.org/html/rfc7235#section-3.1"
-            },
-            
-            Amazon.Runtime.AmazonServiceException awsEx => new ProblemDetails
-            {
-                Status = (int)HttpStatusCode.BadGateway,
-                Title = "Erro do serviço AWS",
-                Detail = $"Erro no serviço AWS: {awsEx.Message}",
-                Instance = context.Request.Path,
-                Type = "https://tools.ietf.org/html/rfc7231#section-6.6.3"
-            },
-            
-            TaskCanceledException => new ProblemDetails
-            {
-                Status = (int)HttpStatusCode.RequestTimeout,
-                Title = "Operação cancelada",
-                Detail = "A operação foi cancelada devido ao timeout",
-                Instance = context.Request.Path,
-                Type = "https://tools.ietf.org/html/rfc7231#section-6.5.7"
-            },
-            
-            _ => new ProblemDetails
-            {
-                Status = (int)HttpStatusCode.InternalServerError,
-                Title = "Erro interno do servidor",
-                Detail = "Ocorreu um erro inesperado. Tente novamente mais tarde",
-                Instance = context.Request.Path,
-                Type = "https://tools.ietf.org/html/rfc7231#section-6.6.1"
-            }
+            ArgumentNullException or ArgumentException => (int)HttpStatusCode.BadRequest,
+            UnauthorizedAccessException => (int)HttpStatusCode.Unauthorized,
+            TimeoutException or TaskCanceledException => (int)HttpStatusCode.RequestTimeout,
+            HttpRequestException => (int)HttpStatusCode.BadGateway,
+            Amazon.Runtime.AmazonServiceException awsEx when awsEx.Message.Contains("Authentication Token") => (int)HttpStatusCode.Unauthorized,
+            Amazon.Runtime.AmazonServiceException => (int)HttpStatusCode.BadGateway,
+            _ => (int)HttpStatusCode.InternalServerError
+        };
+    }
+
+    private static string GetTitle(Exception exception)
+    {
+        return exception switch
+        {
+            ArgumentNullException => "Parâmetro obrigatório não informado",
+            ArgumentException => "Parâmetro inválido",
+            UnauthorizedAccessException => "Acesso negado",
+            TimeoutException => "Timeout na operação",
+            TaskCanceledException => "Operação cancelada",
+            HttpRequestException => "Erro de comunicação",
+            Amazon.Runtime.AmazonServiceException awsEx when awsEx.Message.Contains("Authentication Token") => "Erro de autenticação AWS",
+            Amazon.Runtime.AmazonServiceException => "Erro do serviço AWS",
+            _ => "Erro interno do servidor"
+        };
+    }
+
+    private static string GetDetail(Exception exception)
+    {
+        return exception switch
+        {
+            ArgumentNullException nullEx => $"O parâmetro '{nullEx.ParamName}' é obrigatório",
+            ArgumentException argEx => argEx.Message,
+            UnauthorizedAccessException => "Você não tem permissão para acessar este recurso",
+            TimeoutException => "A operação excedeu o tempo limite permitido",
+            TaskCanceledException => "A operação foi cancelada devido ao timeout",
+            HttpRequestException httpEx => $"Falha na comunicação com o serviço externo: {httpEx.Message}",
+            Amazon.Runtime.AmazonServiceException awsEx when awsEx.Message.Contains("Authentication Token") => "Falha na autenticação com LocalStack. Verifique as credenciais AWS configuradas.",
+            Amazon.Runtime.AmazonServiceException awsEx => $"Erro no serviço AWS: {awsEx.Message}",
+            _ => "Ocorreu um erro inesperado. Tente novamente mais tarde"
+        };
+    }
+
+    private static string GetType(Exception exception)
+    {
+        return exception switch
+        {
+            ArgumentNullException or ArgumentException => "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+            UnauthorizedAccessException => "https://tools.ietf.org/html/rfc7235#section-3.1",
+            TimeoutException or TaskCanceledException => "https://tools.ietf.org/html/rfc7231#section-6.5.7",
+            HttpRequestException => "https://tools.ietf.org/html/rfc7231#section-6.6.3",
+            Amazon.Runtime.AmazonServiceException awsEx when awsEx.Message.Contains("Authentication Token") => "https://tools.ietf.org/html/rfc7235#section-3.1",
+            Amazon.Runtime.AmazonServiceException => "https://tools.ietf.org/html/rfc7231#section-6.6.3",
+            _ => "https://tools.ietf.org/html/rfc7231#section-6.6.1"
         };
     }
 }

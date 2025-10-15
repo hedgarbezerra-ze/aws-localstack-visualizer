@@ -1,9 +1,13 @@
 @page "/sqs"
 @page "/sqs/{QueueName?}"
+@using AwsLocalStackVisualizer.Abstractions
+@using AwsLocalStackVisualizer.Models.SQS
+@using AwsLocalStackVisualizer.Models.SNS
 @using AwsLocalStackVisualizer.Services
-@using AwsLocalStackVisualizer.Models
 @inject ILocalStackService LocalStackService
+@inject IReadOnlyService ReadOnlyService
 @inject IJSRuntime JSRuntime
+@inject NavigationManager Navigation
 @rendermode InteractiveServer
 
 <PageTitle>SQS Manager - LocalStack Visualizer</PageTitle>
@@ -14,8 +18,7 @@
             <div class="d-flex justify-content-between align-items-center">
                 <div>
                     <h1 class="display-5">
-                        <i class="bi bi-list-ul text-success"></i>
-                        SQS Manager
+                        SQS Filas
                     </h1>
                     @if (!string.IsNullOrEmpty(QueueName))
                     {
@@ -32,16 +35,16 @@
                 <div class="btn-group">
                     @if (string.IsNullOrEmpty(QueueName))
                     {
-                        <button class="btn btn-success" @onclick="ShowCreateQueueModal">
+                        <button class="btn btn-success" @onclick="ShowCreateQueueModal" disabled="@ReadOnlyService.IsReadOnly">
                             <i class="bi bi-plus-circle"></i> Criar Fila
                         </button>
                     }
                     else
                     {
-                        <button class="btn btn-success" @onclick="() => ShowSendMessageModal()">
+                        <button class="btn btn-success" @onclick="() => ShowSendMessageModal()" disabled="@ReadOnlyService.IsReadOnly">
                             <i class="bi bi-send"></i> Enviar Mensagem
                         </button>
-                        <button class="btn btn-info" @onclick="() => ShowSubscribeToSnsModal()">
+                        <button class="btn btn-info" @onclick="() => ShowSubscribeToSnsModal()" disabled="@ReadOnlyService.IsReadOnly">
                             <i class="bi bi-link"></i> Associar ao SNS
                         </button>
                     }
@@ -80,14 +83,13 @@
     }
     else if (string.IsNullOrEmpty(QueueName))
     {
-        <!-- Lista de Filas -->
         <div class="row">
             <div class="col-12">
                 <h3>Filas Disponíveis</h3>
                 @if (queues.Any())
                 {
                     <div class="row">
-                        @foreach (var queue in queues)
+                        @foreach (var queue in paginatedQueues)
                         {
                             <div class="col-lg-4 col-md-6 mb-4">
                                 <div class="card h-100">
@@ -127,11 +129,13 @@
                                                     <i class="bi bi-link"></i> SNS
                                                 </button>
                                                 <button class="btn btn-outline-secondary btn-sm" 
-                                                        @onclick="() => ShowPurgeQueueModal(queue.Url, queue.Name)">
+                                                        @onclick="() => ShowPurgeQueueModal(queue.Url, queue.Name)"
+                                                        disabled="@ReadOnlyService.IsReadOnly">
                                                     <i class="bi bi-trash3"></i> Limpar
                                                 </button>
                                                 <button class="btn btn-outline-danger btn-sm" 
-                                                        @onclick="() => ShowDeleteQueueModal(queue.Url, queue.Name)">
+                                                        @onclick="() => ShowDeleteQueueModal(queue.Url, queue.Name)"
+                                                        disabled="@ReadOnlyService.IsReadOnly">
                                                     <i class="bi bi-trash"></i> Excluir
                                                 </button>
                                             </div>
@@ -141,6 +145,42 @@
                             </div>
                         }
                     </div>
+                    
+                    @if (totalPages > 1)
+                    {
+                        <div class="row mt-4">
+                            <div class="col-12">
+                                <nav aria-label="Paginação de filas">
+                                    <ul class="pagination justify-content-center">
+                                        <li class="page-item @(currentPage == 1 ? "disabled" : "")">
+                                            <button class="page-link" @onclick="() => GoToPage(currentPage - 1)" disabled="@(currentPage == 1)">
+                                                <i class="bi bi-chevron-left"></i> Anterior
+                                            </button>
+                                        </li>
+                                        
+                                        @for (int page = 1; page <= totalPages; page++)
+                                        {
+                                            var pageNumber = page;
+                                            <li class="page-item @(currentPage == pageNumber ? "active" : "")">
+                                                <button class="page-link" @onclick="() => GoToPage(pageNumber)">
+                                                    @pageNumber
+                                                </button>
+                                            </li>
+                                        }
+                                        
+                                        <li class="page-item @(currentPage == totalPages ? "disabled" : "")">
+                                            <button class="page-link" @onclick="() => GoToPage(currentPage + 1)" disabled="@(currentPage == totalPages)">
+                                                Próxima <i class="bi bi-chevron-right"></i>
+                                            </button>
+                                        </li>
+                                    </ul>
+                                </nav>
+                                <div class="text-center text-muted">
+                                    <small>Página @currentPage de @totalPages (@queues.Count filas no total)</small>
+                                </div>
+                            </div>
+                        </div>
+                    }
                 }
                 else
                 {
@@ -154,17 +194,21 @@
     }
     else
     {
-        <!-- Detalhes da Fila -->
         @if (queueDetails != null)
         {
             <div class="row mb-4">
                 <div class="col-12">
                     <div class="card">
                         <div class="card-body">
-                            <h5 class="card-title">
-                                <i class="bi bi-inbox text-success"></i>
-                                @queueDetails.QueueInfo.Name
-                            </h5>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h5 class="card-title mb-0">
+                                    <i class="bi bi-inbox text-success"></i>
+                                    @queueDetails.QueueInfo.Name
+                                </h5>
+                                <button class="btn btn-outline-danger" @onclick="() => ShowDeleteQueueModal(queueDetails.QueueInfo.Url, queueDetails.QueueInfo.Name)" disabled="@ReadOnlyService.IsReadOnly">
+                                    <i class="bi bi-trash"></i> Excluir Fila
+                                </button>
+                            </div>
                             <div class="row">
                                 <div class="col-md-3">
                                     <strong>Mensagens:</strong> 
@@ -179,9 +223,34 @@
                                 </div>
                             </div>
                             <hr>
+                            <div class="row">
+                                <div class="col-md-8">
                             <small class="text-muted">
                                 <strong>URL:</strong> @queueDetails.QueueInfo.Url
                             </small>
+                        </div>
+                                <div class="col-md-4">
+                                    @if (subscribedTopicArns.Any())
+                                    {
+                                        <small class="text-muted">
+                                            <strong>Tópicos Inscritos:</strong>
+                                            <div class="mt-1">
+                                                @foreach (var topicArn in subscribedTopicArns)
+                                                {
+                                                    var topicName = GetTopicNameFromArn(topicArn);
+                                                    <span class="badge bg-success me-1">@topicName</span>
+                                                }
+                                            </div>
+                                        </small>
+                                    }
+                                    else
+                                    {
+                                        <small class="text-muted">
+                                            <strong>Tópicos Inscritos:</strong> Nenhum
+                                        </small>
+                                    }
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -275,7 +344,6 @@
     }
 </div>
 
-<!-- Create Queue Modal -->
 @if (showCreateQueueModal)
 {
     <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
@@ -307,7 +375,6 @@
     </div>
 }
 
-<!-- Send Message Modal -->
 @if (showSendMessageModal)
 {
     <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
@@ -324,8 +391,37 @@
                     </div>
                     <div class="mb-3">
                         <label for="messageBody" class="form-label">Corpo da Mensagem</label>
-                        <textarea class="form-control" id="messageBody" rows="8" @bind="messageBody" placeholder="Digite o conteúdo da mensagem..."></textarea>
-                        <div class="form-text">Você pode enviar texto simples ou JSON.</div>
+                        <div class="position-relative">
+                            <textarea class="form-control font-monospace" 
+                                      id="messageBody" 
+                                      rows="12" 
+                                      @bind="messageBody" 
+                                      @oninput="OnMessageBodyInput"
+                                      placeholder="Digite o conteúdo da mensagem..."
+                                      style="resize: vertical; font-size: 14px; line-height: 1.4;"></textarea>
+                            <div class="position-absolute top-0 end-0 p-2">
+                                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="FormatJsonMessage" title="Formatar e organizar JSON">
+                                    <i class="bi bi-braces me-1"></i>Formatar JSON
+                                </button>
+                            </div>
+                        </div>
+                        <div class="form-text d-flex justify-content-between align-items-center">
+                            <span>Você pode enviar texto simples ou JSON.</span>
+                            <span class="@(isValidJson ? "text-success" : (jsonValidationMessage != null ? "text-danger" : "text-muted"))">
+                                @if (isValidJson)
+                                {
+                                    <i class="bi bi-check-circle-fill"></i><text> JSON válido</text>
+                                }
+                                else if (jsonValidationMessage != null)
+                                {
+                                    <i class="bi bi-exclamation-triangle-fill"></i> @jsonValidationMessage
+                                }
+                                else
+                                {
+                                    <span>Caracteres: @messageBody.Length</span>
+                                }
+                            </span>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -343,14 +439,13 @@
     </div>
 }
 
-<!-- Subscribe to SNS Modal -->
 @if (showSubscribeToSnsModal)
 {
     <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Associar Fila ao Tópico SNS</h5>
+                    <h5 class="modal-title">Inscrever à um tópico</h5>
                     <button type="button" class="btn-close" @onclick="HideSubscribeToSnsModal"></button>
                 </div>
                 <div class="modal-body">
@@ -366,15 +461,54 @@
                     else if (availableTopics.Any())
                     {
                         <div class="mb-3">
-                            <label for="topicSelect" class="form-label">Selecione o Tópico SNS</label>
-                            <select class="form-select" id="topicSelect" @bind="selectedTopicArn">
-                                <option value="">-- Selecione um tópico --</option>
+                            <label class="form-label">Tópicos SNS Disponíveis</label>
+                            <div class="list-group">
                                 @foreach (var topic in availableTopics)
                                 {
-                                    <option value="@topic.Arn">@topic.Name</option>
+                                    var isSubscribed = subscribedTopicArns.Contains(topic.Arn);
+                                    var isSelected = selectedTopicArns.Contains(topic.Arn);
+                                    <div class="list-group-item @(isSubscribed ? "list-group-item-success" : "")"
+                                         style="cursor: @(isSubscribed ? "not-allowed" : "pointer")">
+                                        <div class="d-flex align-items-center">
+                                            <div class="form-check me-3">
+                                                <input class="form-check-input" type="checkbox" 
+                                                       id="topic-@topic.Arn.GetHashCode()" 
+                                                       checked="@isSelected"
+                                                       disabled="@isSubscribed"
+                                                       @onchange="(e) => ToggleTopicSelection(topic.Arn, (bool)e.Value!)">
+                                            </div>
+                                            <div class="flex-grow-1">
+                                                <h6 class="mb-1">
+                                                    @if (isSubscribed)
+                                                    {
+                                                        <i class="bi bi-check-circle-fill text-success me-2"></i>
+                                                    }
+                                                    else
+                                                    {
+                                                        <i class="bi bi-circle me-2"></i>
+                                                    }
+                                                    @topic.Name
+                                                </h6>
+                                                <small class="text-muted">@topic.Arn</small>
+                                            </div>
+                                            @if (isSubscribed)
+                                            {
+                                                <span class="badge bg-success">Já Inscrito</span>
+                                            }
+                                        </div>
+                                    </div>
                                 }
-                            </select>
-                            <div class="form-text">A fila @QueueName receberá mensagens publicadas no tópico selecionado.</div>
+                            </div>
+                            <div class="form-text mt-2">
+                                @if (subscribedTopicArns.Any())
+                                {
+                                    <span>Tópicos em verde já estão associados a esta fila. Selecione tópicos não associados para criar novas inscrições.</span>
+                                }
+                                else
+                                {
+                                    <span>A fila @QueueName receberá mensagens publicadas nos tópicos selecionados.</span>
+                                }
+                            </div>
                         </div>
                     }
                     else
@@ -387,13 +521,24 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" @onclick="HideSubscribeToSnsModal">Cancelar</button>
-                    <button type="button" class="btn btn-info" @onclick="SubscribeToSnsTopic" 
-                            disabled="@(isSubscribing || string.IsNullOrWhiteSpace(selectedTopicArn) || !availableTopics.Any())">
+                    <button type="button" class="btn btn-info" @onclick="SubscribeToSnsTopics" 
+                            disabled="@(isSubscribing || !selectedTopicArns.Any() || !availableTopics.Any())">
                         @if (isSubscribing)
                         {
                             <span class="spinner-border spinner-border-sm me-2"></span>
                         }
-                        Associar ao SNS
+                        @if (selectedTopicArns.Count == 1)
+                        {
+                            <span>Inscrever em 1 tópico</span>
+                        }
+                        else if (selectedTopicArns.Count > 1)
+                        {
+                            <span>Inscrever em @selectedTopicArns.Count tópicos</span>
+                        }
+                        else
+                        {
+                            <span>Inscrever nos tópicos</span>
+                        }
                     </button>
                 </div>
             </div>
@@ -401,7 +546,6 @@
     </div>
 }
 
-<!-- Modal de confirmação de exclusão de fila -->
 @if (showDeleteQueueModal)
 {
     <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
@@ -433,7 +577,6 @@
     </div>
 }
 
-<!-- Modal de confirmação de limpeza de fila -->
 @if (showPurgeQueueModal)
 {
     <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
@@ -473,27 +616,31 @@
     private bool isLoading = true;
     private bool hasError = false;
     
-    // Create queue modal
+    private int currentPage = 1;
+    private const int itemsPerPage = 6;
+    private int totalPages => (int)Math.Ceiling((double)queues.Count / itemsPerPage);
+    private List<SqsQueueInfo> paginatedQueues => queues.Skip((currentPage - 1) * itemsPerPage).Take(itemsPerPage).ToList();
+    
     private bool showCreateQueueModal = false;
     private string newQueueName = string.Empty;
     private bool isCreatingQueue = false;
     
-    // Send message modal
     private bool showSendMessageModal = false;
     private string messageBody = string.Empty;
     private string messageSubject = string.Empty;
     private bool isSendingMessage = false;
     private string selectedQueueUrl = string.Empty;
     private string selectedQueueName = string.Empty;
+    private bool isValidJson = false;
+    private string? jsonValidationMessage = null;
     
-    // Subscribe to SNS modal
     private bool showSubscribeToSnsModal = false;
     private List<SnsTopicInfo> availableTopics = new();
-    private string selectedTopicArn = string.Empty;
+    private List<string> subscribedTopicArns = new();
+    private List<string> selectedTopicArns = new();
     private bool isSubscribing = false;
     private bool isLoadingTopics = false;
     
-    // Delete and Purge Modals
     private bool showDeleteQueueModal = false;
     private bool showPurgeQueueModal = false;
     private string queueToDelete = string.Empty;
@@ -532,6 +679,11 @@
                 var result = await LocalStackService.GetSqsQueueDetailsAsync(QueueName);
                 queueDetails = result.IsSuccess ? result.Data : null;
                 queues.Clear();
+                
+                if (queueDetails != null)
+                {
+                    await LoadSubscribedTopicsForCurrentQueue();
+                }
             }
         }
         catch (Exception)
@@ -552,7 +704,7 @@
 
     private async Task NavigateToQueue(string queueName)
     {
-        await JSRuntime.InvokeVoidAsync("window.location.href", $"/sqs/{queueName}");
+        await JSRuntime.InvokeVoidAsync("eval", $"window.location.href = '/sqs/{queueName}'");
     }
 
     private string FormatMessageBody(string body)
@@ -588,7 +740,6 @@
         return systemAttributes.Contains(attributeName);
     }
 
-    // Create Queue Modal Methods
     private void ShowCreateQueueModal()
     {
         newQueueName = string.Empty;
@@ -625,14 +776,12 @@
         }
     }
 
-    // Send Message Modal Methods
     private void ShowSendMessageModal(string queueUrl = "", string queueName = "")
     {
         messageBody = string.Empty;
         messageSubject = string.Empty;
         showSendMessageModal = true;
         
-        // Se chamado da lista de filas, armazenar informações da fila
         if (!string.IsNullOrEmpty(queueUrl) && !string.IsNullOrEmpty(queueName))
         {
             selectedQueueUrl = queueUrl;
@@ -645,13 +794,14 @@
         showSendMessageModal = false;
         messageBody = string.Empty;
         messageSubject = string.Empty;
+        isValidJson = false;
+        jsonValidationMessage = null;
     }
 
     private async Task SendMessage()
     {
         string queueUrl = "";
         
-        // Determinar qual fila usar
         if (!string.IsNullOrEmpty(selectedQueueUrl))
         {
             queueUrl = selectedQueueUrl;
@@ -689,14 +839,73 @@
         }
     }
 
-    // Subscribe to SNS Modal Methods
+    private void OnMessageBodyInput(ChangeEventArgs e)
+    {
+        messageBody = e.Value?.ToString() ?? string.Empty;
+        ValidateJsonSilently();
+    }
+
+    private void ValidateJsonSilently()
+    {
+        if (string.IsNullOrWhiteSpace(messageBody))
+        {
+            isValidJson = false;
+            jsonValidationMessage = null;
+            return;
+        }
+
+        var trimmed = messageBody.Trim();
+        if (!trimmed.StartsWith("{") && !trimmed.StartsWith("["))
+        {
+            isValidJson = false;
+            jsonValidationMessage = null;
+            return;
+        }
+
+        try
+        {
+            System.Text.Json.JsonDocument.Parse(messageBody);
+            isValidJson = true;
+            jsonValidationMessage = null;
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            isValidJson = false;
+            jsonValidationMessage = $"JSON inválido: {ex.Message}";
+        }
+    }
+
+    private void FormatJsonMessage()
+    {
+        if (string.IsNullOrWhiteSpace(messageBody))
+            return;
+
+        try
+        {
+            var jsonDoc = System.Text.Json.JsonDocument.Parse(messageBody);
+            messageBody = System.Text.Json.JsonSerializer.Serialize(jsonDoc, new System.Text.Json.JsonSerializerOptions 
+            { 
+                WriteIndented = true,
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            });
+            ValidateJsonSilently();
+            StateHasChanged();
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            jsonValidationMessage = $"Erro ao formatar: {ex.Message}";
+            isValidJson = false;
+            StateHasChanged();
+        }
+    }
+
+
     private async Task ShowSubscribeToSnsModal(string queueUrl = "", string queueName = "")
     {
-        selectedTopicArn = string.Empty;
+        selectedTopicArns.Clear();
         availableTopics.Clear();
         showSubscribeToSnsModal = true;
         
-        // Se chamado da lista de filas, armazenar informações da fila
         if (!string.IsNullOrEmpty(queueUrl) && !string.IsNullOrEmpty(queueName))
         {
             selectedQueueUrl = queueUrl;
@@ -709,7 +918,7 @@
     private void HideSubscribeToSnsModal()
     {
         showSubscribeToSnsModal = false;
-        selectedTopicArn = string.Empty;
+        selectedTopicArns.Clear();
         availableTopics.Clear();
     }
 
@@ -725,6 +934,8 @@
             {
                 availableTopics = result.Data.ToList();
             }
+            
+            await LoadSubscribedTopics();
         }
         finally
         {
@@ -733,9 +944,133 @@
         }
     }
 
-    private async Task SubscribeToSnsTopic()
+    private async Task LoadSubscribedTopics()
     {
-        if (string.IsNullOrWhiteSpace(selectedTopicArn) || queueDetails == null)
+        subscribedTopicArns.Clear();
+        
+        string queueUrl = "";
+        if (queueDetails != null)
+        {
+            queueUrl = queueDetails.QueueInfo.Url;
+        }
+        else if (!string.IsNullOrEmpty(selectedQueueUrl))
+        {
+            queueUrl = selectedQueueUrl;
+        }
+        
+        if (string.IsNullOrEmpty(queueUrl)) return;
+        
+        try
+        {
+            var queueArn = ConvertQueueUrlToArn(queueUrl);
+            
+            foreach (var topic in availableTopics)
+            {
+                var subscriptionsResult = await LocalStackService.GetSnsSubscriptionsAsync(topic.Arn);
+                if (subscriptionsResult.IsSuccess && subscriptionsResult.Data != null)
+                {
+                    var isSubscribed = subscriptionsResult.Data.Any(s => s.Endpoint == queueArn);
+                    
+                    if (isSubscribed)
+                    {
+                        subscribedTopicArns.Add(topic.Arn);
+                    }
+                }
+            }
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    private async Task LoadSubscribedTopicsForCurrentQueue()
+    {
+        subscribedTopicArns.Clear();
+        
+        if (queueDetails == null) return;
+        
+        try
+        {
+            var topicsResult = await LocalStackService.GetSnsTopicsAsync();
+            if (topicsResult.IsSuccess && topicsResult.Data != null)
+            {
+                var queueArn = ConvertQueueUrlToArn(queueDetails.QueueInfo.Url);
+                
+                foreach (var topic in topicsResult.Data)
+                {
+                    var subscriptionsResult = await LocalStackService.GetSnsSubscriptionsAsync(topic.Arn);
+                    if (subscriptionsResult.IsSuccess && subscriptionsResult.Data != null)
+                    {
+                        var isSubscribed = subscriptionsResult.Data.Any(s => s.Endpoint == queueArn);
+                        
+                        if (isSubscribed)
+                        {
+                            subscribedTopicArns.Add(topic.Arn);
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    private void ToggleTopicSelection(string topicArn, bool isSelected)
+    {
+        if (isSelected)
+        {
+            if (!selectedTopicArns.Contains(topicArn))
+            {
+                selectedTopicArns.Add(topicArn);
+            }
+        }
+        else
+        {
+            selectedTopicArns.Remove(topicArn);
+        }
+        StateHasChanged();
+    }
+
+    private string GetTopicNameFromArn(string topicArn)
+    {
+        if (string.IsNullOrEmpty(topicArn)) return string.Empty;
+        
+        var parts = topicArn.Split(':');
+        return parts.Length > 0 ? parts[^1] : topicArn;
+    }
+
+    private string ConvertQueueUrlToArn(string queueUrl)
+    {
+        if (string.IsNullOrEmpty(queueUrl)) return string.Empty;
+        
+        var parts = queueUrl.Split('/');
+        if (parts.Length >= 3)
+        {
+            var accountId = parts[^2];
+            var queueName = parts[^1];
+            return $"arn:aws:sqs:us-west-2:{accountId}:{queueName}";
+        }
+        
+        return queueUrl;
+    }
+
+    private async Task SubscribeToSnsTopics()
+    {
+        if (!selectedTopicArns.Any())
+            return;
+
+        string queueUrl = "";
+        if (queueDetails != null)
+        {
+            queueUrl = queueDetails.QueueInfo.Url;
+        }
+        else if (!string.IsNullOrEmpty(selectedQueueUrl))
+        {
+            queueUrl = selectedQueueUrl;
+        }
+        
+        if (string.IsNullOrEmpty(queueUrl))
             return;
 
         isSubscribing = true;
@@ -743,13 +1078,22 @@
 
         try
         {
-            var queueArn = queueDetails.QueueInfo.Url.Replace("http://localhost:4566", "arn:aws:sqs:us-west-2:000000000000").Replace("/", ":");
-            var result = await LocalStackService.SubscribeSnsAsync(selectedTopicArn, "sqs", queueArn);
+            var queueArn = ConvertQueueUrlToArn(queueUrl);
+            
+            foreach (var topicArn in selectedTopicArns)
+            {
+                var result = await LocalStackService.SubscribeSnsAsync(topicArn, "sqs", queueArn);
             if (result.IsSuccess)
             {
+                    if (!subscribedTopicArns.Contains(topicArn))
+                    {
+                        subscribedTopicArns.Add(topicArn);
+                    }
+                }
+            }
+            
                 HideSubscribeToSnsModal();
                 await LoadData();
-            }
         }
         finally
         {
@@ -758,7 +1102,6 @@
         }
     }
 
-    // Delete Queue Methods
     private void ShowDeleteQueueModal(string queueUrl, string queueName)
     {
         queueToDelete = queueUrl;
@@ -787,7 +1130,14 @@
             if (result.IsSuccess)
             {
                 HideDeleteQueueModal();
-                await LoadData();
+                if (!string.IsNullOrEmpty(QueueName) && queueDetails?.QueueInfo.Name == queueNameToDelete)
+                {
+                    Navigation.NavigateTo("/sqs", forceLoad: true);
+                }
+                else
+                {
+                    await LoadData();
+                }
             }
         }
         finally
@@ -797,7 +1147,6 @@
         }
     }
 
-    // Purge Queue Methods
     private void ShowPurgeQueueModal(string queueUrl, string queueName)
     {
         queueToPurge = queueUrl;
@@ -832,6 +1181,15 @@
         finally
         {
             isPurgingQueue = false;
+            StateHasChanged();
+        }
+    }
+
+    private void GoToPage(int page)
+    {
+        if (page >= 1 && page <= totalPages)
+        {
+            currentPage = page;
             StateHasChanged();
         }
     }

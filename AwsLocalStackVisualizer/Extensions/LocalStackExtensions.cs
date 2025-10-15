@@ -15,13 +15,11 @@ namespace AwsLocalStackVisualizer.Extensions
         {
             try
             {
-                // Verifica se o bucket já existe
                 var response = await s3Client.ListBucketsAsync();
                 var bucketExists = response.Buckets.Any(b => b.BucketName == bucketName);
                 
                 if (!bucketExists)
                 {
-                    // Cria o bucket se não existir
                     await s3Client.PutBucketAsync(new PutBucketRequest
                     {
                         BucketName = bucketName

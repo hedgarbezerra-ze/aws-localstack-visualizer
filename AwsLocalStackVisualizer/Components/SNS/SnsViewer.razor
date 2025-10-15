@@ -1,9 +1,12 @@
 @page "/sns"
 @page "/sns/{TopicArn?}"
+@using AwsLocalStackVisualizer.Abstractions
+@using AwsLocalStackVisualizer.Models.SNS
 @using AwsLocalStackVisualizer.Services
-@using AwsLocalStackVisualizer.Models
 @inject ILocalStackService LocalStackService
+@inject IReadOnlyService ReadOnlyService
 @inject IJSRuntime JSRuntime
+@inject NavigationManager Navigation
 @rendermode InteractiveServer
 
 <PageTitle>SNS Viewer - LocalStack Visualizer</PageTitle>
@@ -14,8 +17,7 @@
             <div class="d-flex justify-content-between align-items-center">
                 <div>
                     <h1 class="display-5">
-                        <i class="bi bi-megaphone text-warning"></i>
-                        SNS Viewer
+                        SNS Tópicos
                     </h1>
                     @if (!string.IsNullOrEmpty(TopicArn))
                     {
@@ -32,17 +34,14 @@
                 <div class="btn-group">
                     @if (string.IsNullOrEmpty(TopicArn))
                     {
-                        <button class="btn btn-success" @onclick="ShowCreateTopicModal">
+                        <button class="btn btn-success" @onclick="ShowCreateTopicModal" disabled="@ReadOnlyService.IsReadOnly">
                             <i class="bi bi-plus-circle"></i> Criar Tópico
                         </button>
                     }
                     else
                     {
-                        <button class="btn btn-success" @onclick="() => ShowPublishMessageModal()">
+                        <button class="btn btn-success" @onclick="() => ShowPublishMessageModal()" disabled="@ReadOnlyService.IsReadOnly">
                             <i class="bi bi-megaphone"></i> Publicar Mensagem
-                        </button>
-                        <button class="btn btn-info" @onclick="() => ShowCreateSubscriptionModal()">
-                            <i class="bi bi-person-plus"></i> Nova Assinatura
                         </button>
                     }
                     <button class="btn btn-outline-primary" @onclick="RefreshData">
@@ -80,14 +79,13 @@
     }
     else if (string.IsNullOrEmpty(TopicArn))
     {
-        <!-- Lista de Tópicos -->
         <div class="row">
             <div class="col-12">
                 <h3>Tópicos Disponíveis</h3>
                 @if (topics.Any())
                 {
                     <div class="row">
-                        @foreach (var topic in topics)
+                        @foreach (var topic in paginatedTopics)
                         {
                             <div class="col-lg-4 col-md-6 mb-4">
                                 <div class="card h-100">
@@ -125,12 +123,9 @@
                                                         @onclick="() => ShowPublishMessageModal(topic.Arn, topic.Name)">
                                                     <i class="bi bi-megaphone"></i> Publicar
                                                 </button>
-                                                <button class="btn btn-outline-info btn-sm" 
-                                                        @onclick="() => ShowCreateSubscriptionModal(topic.Arn, topic.Name)">
-                                                    <i class="bi bi-person-plus"></i> Assinar
-                                                </button>
                                                 <button class="btn btn-outline-danger btn-sm" 
-                                                        @onclick="() => ShowDeleteTopicModal(topic.Arn, topic.Name)">
+                                                        @onclick="() => ShowDeleteTopicModal(topic.Arn, topic.Name)"
+                                                        disabled="@ReadOnlyService.IsReadOnly">
                                                     <i class="bi bi-trash"></i> Excluir
                                                 </button>
                                             </div>
@@ -140,6 +135,42 @@
                             </div>
                         }
                     </div>
+                    
+                    @if (totalPages > 1)
+                    {
+                        <div class="row mt-4">
+                            <div class="col-12">
+                                <nav aria-label="Paginação de tópicos">
+                                    <ul class="pagination justify-content-center">
+                                        <li class="page-item @(currentPage == 1 ? "disabled" : "")">
+                                            <button class="page-link" @onclick="() => GoToPage(currentPage - 1)" disabled="@(currentPage == 1)">
+                                                <i class="bi bi-chevron-left"></i> Anterior
+                                            </button>
+                                        </li>
+                                        
+                                        @for (int page = 1; page <= totalPages; page++)
+                                        {
+                                            var pageNumber = page;
+                                            <li class="page-item @(currentPage == pageNumber ? "active" : "")">
+                                                <button class="page-link" @onclick="() => GoToPage(pageNumber)">
+                                                    @pageNumber
+                                                </button>
+                                            </li>
+                                        }
+                                        
+                                        <li class="page-item @(currentPage == totalPages ? "disabled" : "")">
+                                            <button class="page-link" @onclick="() => GoToPage(currentPage + 1)" disabled="@(currentPage == totalPages)">
+                                                Próxima <i class="bi bi-chevron-right"></i>
+                                            </button>
+                                        </li>
+                                    </ul>
+                                </nav>
+                                <div class="text-center text-muted">
+                                    <small>Página @currentPage de @totalPages (@topics.Count tópicos no total)</small>
+                                </div>
+                            </div>
+                        </div>
+                    }
                 }
                 else
                 {
@@ -153,17 +184,21 @@
     }
     else
     {
-        <!-- Detalhes do Tópico -->
         @if (topicDetails != null)
         {
             <div class="row mb-4">
                 <div class="col-12">
                     <div class="card">
                         <div class="card-body">
-                            <h5 class="card-title">
-                                <i class="bi bi-broadcast text-warning"></i>
-                                @topicDetails.TopicInfo.Name
-                            </h5>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h5 class="card-title mb-0">
+                                    <i class="bi bi-broadcast text-warning"></i>
+                                    @topicDetails.TopicInfo.Name
+                                </h5>
+                                <button class="btn btn-outline-danger" @onclick="() => ShowDeleteTopicModal(topicDetails.TopicInfo.Arn, topicDetails.TopicInfo.Name)" disabled="@ReadOnlyService.IsReadOnly">
+                                    <i class="bi bi-trash"></i> Excluir Tópico
+                                </button>
+                            </div>
                             <div class="row mb-3">
                                 <div class="col-md-4">
                                     <strong>Assinaturas:</strong> 
@@ -303,7 +338,6 @@
     }
 </div>
 
-<!-- Create Topic Modal -->
 @if (showCreateTopicModal)
 {
     <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
@@ -335,7 +369,6 @@
     </div>
 }
 
-<!-- Publish Message Modal -->
 @if (showPublishMessageModal)
 {
     <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
@@ -352,8 +385,37 @@
                     </div>
                     <div class="mb-3">
                         <label for="publishMessage" class="form-label">Mensagem</label>
-                        <textarea class="form-control" id="publishMessage" rows="8" @bind="publishMessage" placeholder="Digite a mensagem a ser publicada..."></textarea>
-                        <div class="form-text">A mensagem será enviada para todos os assinantes do tópico.</div>
+                        <div class="position-relative">
+                            <textarea class="form-control font-monospace" 
+                                      id="publishMessage" 
+                                      rows="12" 
+                                      @bind="publishMessage" 
+                                      @oninput="OnPublishMessageInput"
+                                      placeholder="Digite a mensagem a ser publicada..."
+                                      style="resize: vertical; font-size: 14px; line-height: 1.4;"></textarea>
+                            <div class="position-absolute top-0 end-0 p-2">
+                                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="FormatJsonPublishMessage" title="Formatar e organizar JSON">
+                                    <i class="bi bi-braces me-1"></i>Formatar JSON
+                                </button>
+                            </div>
+                        </div>
+                        <div class="form-text d-flex justify-content-between align-items-center">
+                            <span>A mensagem será enviada para todos os assinantes do tópico.</span>
+                            <span class="@(isValidPublishJson ? "text-success" : (publishJsonValidationMessage != null ? "text-danger" : "text-muted"))">
+                                @if (isValidPublishJson)
+                                {
+                                    <i class="bi bi-check-circle-fill"></i><text> JSON válido</text>
+                                }
+                                else if (publishJsonValidationMessage != null)
+                                {
+                                    <i class="bi bi-exclamation-triangle-fill"></i> @publishJsonValidationMessage
+                                }
+                                else
+                                {
+                                    <span>Caracteres: @publishMessage.Length</span>
+                                }
+                            </span>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -371,51 +433,7 @@
     </div>
 }
 
-<!-- Create Subscription Modal -->
-@if (showCreateSubscriptionModal)
-{
-    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Criar Nova Assinatura</h5>
-                    <button type="button" class="btn-close" @onclick="HideCreateSubscriptionModal"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label for="subscriptionProtocol" class="form-label">Protocolo</label>
-                        <select class="form-select" id="subscriptionProtocol" @bind="subscriptionProtocol">
-                            <option value="email">Email</option>
-                            <option value="email-json">Email (JSON)</option>
-                            <option value="sms">SMS</option>
-                            <option value="sqs">SQS</option>
-                            <option value="http">HTTP</option>
-                            <option value="https">HTTPS</option>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label for="subscriptionEndpoint" class="form-label">Endpoint</label>
-                        <input type="text" class="form-control" id="subscriptionEndpoint" @bind="subscriptionEndpoint" 
-                               placeholder="@GetEndpointPlaceholder(subscriptionProtocol)">
-                        <div class="form-text">@GetEndpointHelp(subscriptionProtocol)</div>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" @onclick="HideCreateSubscriptionModal">Cancelar</button>
-                    <button type="button" class="btn btn-info" @onclick="CreateSubscription" disabled="@(isCreatingSubscription || string.IsNullOrWhiteSpace(subscriptionEndpoint))">
-                        @if (isCreatingSubscription)
-                        {
-                            <span class="spinner-border spinner-border-sm me-2"></span>
-                        }
-                        Criar Assinatura
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-}
 
-<!-- Modal de confirmação de exclusão de tópico -->
 @if (showDeleteTopicModal)
 {
     <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
@@ -455,30 +473,28 @@
     private bool isLoading = true;
     private bool hasError = false;
     
-    // Create topic modal
+    private int currentPage = 1;
+    private const int itemsPerPage = 6;
+    private int totalPages => (int)Math.Ceiling((double)topics.Count / itemsPerPage);
+    private List<SnsTopicInfo> paginatedTopics => topics.Skip((currentPage - 1) * itemsPerPage).Take(itemsPerPage).ToList();
+    
     private bool showCreateTopicModal = false;
     private string newTopicName = string.Empty;
     private bool isCreatingTopic = false;
     
-    // Publish message modal
     private bool showPublishMessageModal = false;
     private string publishMessage = string.Empty;
     private string publishSubject = string.Empty;
     private bool isPublishingMessage = false;
+    private bool isValidPublishJson = false;
+    private string? publishJsonValidationMessage = null;
     
-    // Create subscription modal
-    private bool showCreateSubscriptionModal = false;
-    private string subscriptionProtocol = "email";
-    private string subscriptionEndpoint = string.Empty;
-    private bool isCreatingSubscription = false;
     
-    // Delete Topic modal
     private bool showDeleteTopicModal = false;
     private string topicToDelete = string.Empty;
     private string topicNameToDelete = string.Empty;
     private bool isDeletingTopic = false;
     
-    // Selected topic for operations
     private string selectedTopicArn = string.Empty;
     private string selectedTopicName = string.Empty;
 
@@ -532,7 +548,7 @@
     private async Task NavigateToTopic(string topicArn)
     {
         var encodedArn = System.Web.HttpUtility.UrlEncode(topicArn);
-        await JSRuntime.InvokeVoidAsync("window.location.href", $"/sns/{encodedArn}");
+        await JSRuntime.InvokeVoidAsync("eval", $"window.location.href = '/sns/{encodedArn}'");
     }
 
     private string GetTopicName(string topicArn)
@@ -568,7 +584,6 @@
         };
     }
 
-    // Create Topic Modal Methods
     private void ShowCreateTopicModal()
     {
         newTopicName = string.Empty;
@@ -605,14 +620,12 @@
         }
     }
 
-    // Publish Message Modal Methods
     private void ShowPublishMessageModal(string topicArn = "", string topicName = "")
     {
         publishMessage = string.Empty;
         publishSubject = string.Empty;
         showPublishMessageModal = true;
         
-        // Se chamado da lista de tópicos, armazenar informações do tópico
         if (!string.IsNullOrEmpty(topicArn) && !string.IsNullOrEmpty(topicName))
         {
             selectedTopicArn = topicArn;
@@ -625,11 +638,26 @@
         showPublishMessageModal = false;
         publishMessage = string.Empty;
         publishSubject = string.Empty;
+        isValidPublishJson = false;
+        publishJsonValidationMessage = null;
     }
 
     private async Task PublishMessage()
     {
-        if (string.IsNullOrWhiteSpace(publishMessage) || string.IsNullOrEmpty(TopicArn))
+        if (string.IsNullOrWhiteSpace(publishMessage))
+            return;
+
+        string topicArn = "";
+        if (!string.IsNullOrEmpty(TopicArn))
+        {
+            topicArn = TopicArn;
+        }
+        else if (!string.IsNullOrEmpty(selectedTopicArn))
+        {
+            topicArn = selectedTopicArn;
+        }
+        
+        if (string.IsNullOrEmpty(topicArn))
             return;
 
         isPublishingMessage = true;
@@ -637,7 +665,11 @@
 
         try
         {
-            var result = await LocalStackService.PublishSnsMessageAsync(TopicArn, publishMessage, publishSubject);
+            var finalSubject = string.IsNullOrWhiteSpace(publishSubject) 
+                ? $"Mensagem SNS - {DateTime.Now:dd/MM/yyyy HH:mm:ss}" 
+                : publishSubject;
+                
+            var result = await LocalStackService.PublishSnsMessageAsync(topicArn, publishMessage, finalSubject);
             if (result.IsSuccess)
             {
                 HidePublishMessageModal();
@@ -651,79 +683,68 @@
         }
     }
 
-    // Create Subscription Modal Methods
-    private void ShowCreateSubscriptionModal(string topicArn = "", string topicName = "")
+    private void OnPublishMessageInput(ChangeEventArgs e)
     {
-        subscriptionProtocol = "email";
-        subscriptionEndpoint = string.Empty;
-        showCreateSubscriptionModal = true;
-        
-        // Se chamado da lista de tópicos, armazenar informações do tópico
-        if (!string.IsNullOrEmpty(topicArn) && !string.IsNullOrEmpty(topicName))
+        publishMessage = e.Value?.ToString() ?? string.Empty;
+        ValidatePublishJsonSilently();
+    }
+
+    private void ValidatePublishJsonSilently()
+    {
+        if (string.IsNullOrWhiteSpace(publishMessage))
         {
-            selectedTopicArn = topicArn;
-            selectedTopicName = topicName;
-        }
-    }
-
-    private void HideCreateSubscriptionModal()
-    {
-        showCreateSubscriptionModal = false;
-        subscriptionProtocol = "email";
-        subscriptionEndpoint = string.Empty;
-    }
-
-    private async Task CreateSubscription()
-    {
-        if (string.IsNullOrWhiteSpace(subscriptionEndpoint) || string.IsNullOrEmpty(TopicArn))
+            isValidPublishJson = false;
+            publishJsonValidationMessage = null;
             return;
+        }
 
-        isCreatingSubscription = true;
-        StateHasChanged();
+        var trimmed = publishMessage.Trim();
+        if (!trimmed.StartsWith("{") && !trimmed.StartsWith("["))
+        {
+            isValidPublishJson = false;
+            publishJsonValidationMessage = null;
+            return;
+        }
 
         try
         {
-            var result = await LocalStackService.SubscribeSnsAsync(TopicArn, subscriptionProtocol, subscriptionEndpoint);
-            if (result.IsSuccess)
-            {
-                HideCreateSubscriptionModal();
-                await LoadData();
-            }
+            System.Text.Json.JsonDocument.Parse(publishMessage);
+            isValidPublishJson = true;
+            publishJsonValidationMessage = null;
         }
-        finally
+        catch (System.Text.Json.JsonException ex)
         {
-            isCreatingSubscription = false;
+            isValidPublishJson = false;
+            publishJsonValidationMessage = $"JSON inválido: {ex.Message}";
+        }
+    }
+
+    private void FormatJsonPublishMessage()
+    {
+        if (string.IsNullOrWhiteSpace(publishMessage))
+            return;
+
+        try
+        {
+            var jsonDoc = System.Text.Json.JsonDocument.Parse(publishMessage);
+            publishMessage = System.Text.Json.JsonSerializer.Serialize(jsonDoc, new System.Text.Json.JsonSerializerOptions 
+            { 
+                WriteIndented = true,
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            });
+            ValidatePublishJsonSilently();
+            StateHasChanged();
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            publishJsonValidationMessage = $"Erro ao formatar: {ex.Message}";
+            isValidPublishJson = false;
             StateHasChanged();
         }
     }
 
-    private string GetEndpointPlaceholder(string protocol)
-    {
-        return protocol switch
-        {
-            "email" or "email-json" => "usuario@exemplo.com",
-            "sms" => "+5511999999999",
-            "sqs" => "arn:aws:sqs:us-west-2:000000000000:nome-da-fila",
-            "http" => "http://exemplo.com/webhook",
-            "https" => "https://exemplo.com/webhook",
-            _ => "Digite o endpoint"
-        };
-    }
 
-    private string GetEndpointHelp(string protocol)
-    {
-        return protocol switch
-        {
-            "email" => "Digite um endereço de email válido",
-            "email-json" => "Digite um endereço de email válido (receberá mensagens em formato JSON)",
-            "sms" => "Digite um número de telefone no formato internacional (+55...)",
-            "sqs" => "Digite o ARN completo da fila SQS",
-            "http" or "https" => "Digite a URL completa do webhook",
-            _ => "Digite o endpoint apropriado para o protocolo selecionado"
-        };
-    }
 
-    // Delete Topic Methods
     private void ShowDeleteTopicModal(string topicArn, string topicName)
     {
         topicToDelete = topicArn;
@@ -752,12 +773,28 @@
             if (result.IsSuccess)
             {
                 HideDeleteTopicModal();
-                await LoadData();
+                if (!string.IsNullOrEmpty(TopicArn) && TopicArn == topicToDelete)
+                {
+                    Navigation.NavigateTo("/sns", forceLoad: true);
+                }
+                else
+                {
+                    await LoadData();
+                }
             }
         }
         finally
         {
             isDeletingTopic = false;
+            StateHasChanged();
+        }
+    }
+
+    private void GoToPage(int page)
+    {
+        if (page >= 1 && page <= totalPages)
+        {
+            currentPage = page;
             StateHasChanged();
         }
     }

@@ -19,6 +19,12 @@ Este diretório contém scripts para configurar recursos de exemplo no LocalStac
 - Requer AWS CLI instalado
 - Usa endpoint externo `http://localhost:4567`
 
+### 4. `aws-token.sh` (Token de Autenticação AWS)
+- **Extrai token de autenticação AWS SSO atual**
+- Busca dinamicamente o arquivo de token mais recente
+- Exibe informações do token (não salva em arquivo)
+- Funciona com perfis AWS SSO configurados
+
 ## Recursos Criados
 
 ### 🪣 S3 Buckets
@@ -67,11 +73,79 @@ docker-compose up localstack -d
 .\scripts\localstack-setup.ps1
 ```
 
+### Opção 4: Token de Autenticação AWS
+```bash
+# Extrair token SSO atual
+./scripts/aws-token.sh
+
+# Exportar diretamente
+aws configure export-credentials --profile clube-do-ze-dev.clube-do-ze-backend --format env
+
+# Verificar identidade
+aws sts get-caller-identity --profile SEU_PERFIL
+
+# Renovar token quando expirar
+aws sso login --profile SEU_PERFIL
+```
+
+## Script de Token AWS
+
+### Funcionalidades
+- **Busca Dinâmica**: Encontra automaticamente o arquivo de token mais recente
+- **Filtragem Inteligente**: Exclui arquivos `botocore-client-id` e procura apenas tokens válidos
+- **Compatibilidade**: Funciona no Windows (Git Bash), Linux e Mac
+- **Extração Robusta**: Extrai token, data de expiração, região e URL
+
+### Como Funciona
+1. Procura em `~/.aws/sso/cache/`
+2. Filtra arquivos que contêm `accessToken`
+3. Exclui arquivos `botocore-client-id-*`
+4. Seleciona o arquivo mais recente
+5. Extrai e exibe informações do token
+
+### Exemplo de Uso
+```bash
+# Executar o script
+./scripts/aws-token.sh
+
+# Saída esperada:
+# === Token AWS SSO Atual ===
+# 📄 Arquivo encontrado: /c/Users/usuario/.aws/sso/cache/abc123.json
+# 🔑 Access Token: aoaAAAAA...
+# ⏰ Expira em: 2025-10-09T02:37:53Z
+# 🌍 Região: us-west-2
+# ✅ Token válido
+```
+
 ## Pré-requisitos
 
 - Docker e Docker Compose
 - AWS CLI (para execução manual)
 - LocalStack rodando na porta 4567
+- **Para Token AWS**: Perfil AWS SSO configurado
+
+## Comandos Úteis para Token AWS
+
+### Verificação de Autenticação
+```bash
+# Verificar identidade atual
+aws sts get-caller-identity --profile SEU_PERFIL
+
+# Listar perfis disponíveis
+aws configure list-profiles
+
+# Verificar configuração atual
+aws configure list
+```
+
+### Gerenciamento de Token
+```bash
+# Renovar token SSO
+aws sso login --profile SEU_PERFIL
+
+# Verificar se token é válido
+./scripts/aws-token.sh
+```
 
 ## Verificação
 

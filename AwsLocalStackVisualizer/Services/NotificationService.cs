@@ -1,13 +1,6 @@
-namespace AwsLocalStackVisualizer.Services;
+using AwsLocalStackVisualizer.Abstractions;
 
-public interface INotificationService
-{
-    event Action<NotificationMessage>? OnNotification;
-    void ShowError(string message, string? title = null);
-    void ShowWarning(string message, string? title = null);
-    void ShowSuccess(string message, string? title = null);
-    void ShowInfo(string message, string? title = null);
-}
+namespace AwsLocalStackVisualizer.Services;
 
 public class NotificationService : INotificationService
 {
@@ -26,12 +19,3 @@ public class NotificationService : INotificationService
         OnNotification?.Invoke(new NotificationMessage(NotificationType.Info, message, title ?? "Informação"));
 }
 
-public record NotificationMessage(NotificationType Type, string Message, string Title);
-
-public enum NotificationType
-{
-    Error,
-    Warning,
-    Success,
-    Info
-}
