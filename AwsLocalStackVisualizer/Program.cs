@@ -61,6 +61,8 @@ builder.Services.AddSingleton<AmazonSecretsManagerClient>(provider =>
     return secretsClient;
 });
 
+builder.Services.AddHttpClient();
+
 builder.Services.AddScoped<IS3Service, S3Service>();
 builder.Services.AddScoped<ISqsService, SqsService>();
 builder.Services.AddScoped<ISnsService, SnsService>();

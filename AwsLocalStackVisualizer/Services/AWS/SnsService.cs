@@ -1,9 +1,13 @@
 using Amazon.SimpleNotificationService;
 using Amazon.SimpleNotificationService.Model;
 using AwsLocalStackVisualizer.Abstractions;
+using AwsLocalStackVisualizer.Configuration;
 using AwsLocalStackVisualizer.Models.Common;
 using AwsLocalStackVisualizer.Models.SNS;
+using Microsoft.Extensions.Options;
+using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 
 namespace AwsLocalStackVisualizer.Services.AWS;
 
@@ -12,12 +16,21 @@ public class SnsService : ISnsService
     private readonly AmazonSimpleNotificationServiceClient _snsClient;
     private readonly ILogger<SnsService> _logger;
     private readonly INotificationService _notificationService;
+    private readonly HttpClient _httpClient;
+    private readonly string _localStackUrl;
 
-    public SnsService(AmazonSimpleNotificationServiceClient snsClient, ILogger<SnsService> logger, INotificationService notificationService)
+    public SnsService(
+        AmazonSimpleNotificationServiceClient snsClient,
+        ILogger<SnsService> logger,
+        INotificationService notificationService,
+        HttpClient httpClient,
+        IOptions<AwsConfiguration> config)
     {
         _snsClient = snsClient ?? throw new ArgumentNullException(nameof(snsClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
+        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _localStackUrl = config.Value.ServiceUrl ?? "http://localhost:4566";
     }
 
     public async Task<OperationResult<IReadOnlyList<SnsTopicInfo>>> GetTopicsAsync()
@@ -25,7 +38,7 @@ public class SnsService : ISnsService
         try
         {
             var response = await _snsClient.ListTopicsAsync();
-            
+
             if (response is { Topics: null or { Count: 0 } })
             {
                 _logger.LogWarning("Resposta do SNS ListTopics é nula ou não contém tópicos");
@@ -33,7 +46,7 @@ public class SnsService : ISnsService
             }
 
             var topicTasks = new List<Task<SnsTopicInfo?>>();
-            
+
             foreach (var topic in response.Topics)
             {
                 if (string.IsNullOrWhiteSpace(topic.TopicArn))
@@ -47,7 +60,7 @@ public class SnsService : ISnsService
 
             var topicResults = await Task.WhenAll(topicTasks);
             var topics = topicResults.Where(t => t is not null).Cast<SnsTopicInfo>().ToList();
-            
+
             return new OperationResult<IReadOnlyList<SnsTopicInfo>>(true, topics);
         }
         catch (Exception ex)
@@ -63,7 +76,7 @@ public class SnsService : ISnsService
         try
         {
             var response = await _snsClient.ListTopicsAsync();
-            
+
             if (response is { Topics: null or { Count: 0 } })
             {
                 _logger.LogWarning("Resposta do SNS ListTopics é nula ou não contém tópicos");
@@ -115,7 +128,7 @@ public class SnsService : ISnsService
 
             var subscriptions = await _snsClient.ListSubscriptionsByTopicAsync(topicArn);
             var subscriptionCount = subscriptions?.Subscriptions?.Count ?? 0;
-            
+
             return new SnsTopicInfo(
                 topicName,
                 topicArn,
@@ -150,9 +163,9 @@ public class SnsService : ISnsService
             var topicsResult = await GetTopicsAsync();
             if (!topicsResult.IsSuccess || topicsResult.Data == null)
                 return new OperationResult<SnsTopicDetails>(false, null, "Falha ao obter lista de tópicos");
-                
+
             var topicInfo = topicsResult.Data.FirstOrDefault(t => t.Arn == topicArn);
-            
+
             if (topicInfo is null)
             {
                 var topicName = topicArn.Split(':').Last();
@@ -160,9 +173,13 @@ public class SnsService : ISnsService
             }
 
             var response = await _snsClient.ListSubscriptionsByTopicAsync(topicArn);
-            
+            var messagesResult = await GetTopicMessagesAsync(topicArn);
+            var messages = messagesResult.IsSuccess && messagesResult.Data != null
+                ? messagesResult.Data
+                : (IReadOnlyList<SnsMessageInfo>)[];
+
             if (response is not { Subscriptions: { } subscriptionsList })
-                return new OperationResult<SnsTopicDetails>(true, new SnsTopicDetails(topicInfo, []));
+                return new OperationResult<SnsTopicDetails>(true, new SnsTopicDetails(topicInfo, [], messages, messages.Count));
 
             var subscriptions = subscriptionsList
                 .Where(sub => sub is not null)
@@ -174,14 +191,14 @@ public class SnsService : ISnsService
                     sub.Owner ?? string.Empty
                 )).ToList();
 
-            return new OperationResult<SnsTopicDetails>(true, new SnsTopicDetails(topicInfo, subscriptions));
+            return new OperationResult<SnsTopicDetails>(true, new SnsTopicDetails(topicInfo, subscriptions, messages, messages.Count));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao obter detalhes do tópico {TopicArn}", topicArn);
             var topicName = topicArn.Split(':').Last();
             var defaultTopic = new SnsTopicInfo(topicName, topicArn, 0, DateTime.UtcNow);
-            return new OperationResult<SnsTopicDetails>(false, new SnsTopicDetails(defaultTopic, []), ex.Message, ex);
+            return new OperationResult<SnsTopicDetails>(false, new SnsTopicDetails(defaultTopic, [], [], 0), ex.Message, ex);
         }
     }
 
@@ -192,7 +209,7 @@ public class SnsService : ISnsService
             var response = await _snsClient.ListSubscriptionsByTopicAsync(topicArn);
             if(response is { Subscriptions: null or { Capacity: 0 } })
                 return new OperationResult<IReadOnlyList<SnsSubscriptionInfo>>(true, []);
-            
+
             var subscriptions = response.Subscriptions
                 .Where(sub => sub is not null)
                 .Select(sub => new SnsSubscriptionInfo(
@@ -212,6 +229,154 @@ public class SnsService : ISnsService
         }
     }
 
+    public async Task<OperationResult<IReadOnlyList<SnsMessageInfo>>> GetTopicMessagesAsync(string topicArn)
+    {
+        try
+        {
+            var topicName = topicArn.Split(':').LastOrDefault() ?? string.Empty;
+            var encodedArn = Uri.EscapeDataString(topicArn);
+            var url = $"{_localStackUrl}/_aws/sns/messages?topicArn={encodedArn}";
+
+            var response = await _httpClient.GetAsync(url);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Endpoint de mensagens SNS não disponível ou sem mensagens para {TopicArn}", topicArn);
+                return new OperationResult<IReadOnlyList<SnsMessageInfo>>(true, []);
+            }
+
+            var content = await response.Content.ReadAsStringAsync();
+
+            if (string.IsNullOrWhiteSpace(content) || content == "{}" || content == "[]")
+                return new OperationResult<IReadOnlyList<SnsMessageInfo>>(true, []);
+
+            var messages = ParseSnsMessages(content, topicArn);
+            return new OperationResult<IReadOnlyList<SnsMessageInfo>>(true, messages);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "Não foi possível acessar endpoint de mensagens SNS para {TopicArn}", topicArn);
+            return new OperationResult<IReadOnlyList<SnsMessageInfo>>(true, []);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao obter mensagens do tópico {TopicArn}", topicArn);
+            return new OperationResult<IReadOnlyList<SnsMessageInfo>>(false, [], ex.Message, ex);
+        }
+    }
+
+    private List<SnsMessageInfo> ParseSnsMessages(string jsonContent, string topicArn)
+    {
+        var messages = new List<SnsMessageInfo>();
+
+        try
+        {
+            using var doc = JsonDocument.Parse(jsonContent);
+            var root = doc.RootElement;
+
+            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("messages", out var messagesArray))
+            {
+                foreach (var msgElement in messagesArray.EnumerateArray())
+                {
+                    var message = ParseMessageElement(msgElement, topicArn);
+                    if (message != null)
+                        messages.Add(message);
+                }
+            }
+            else if (root.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var msgElement in root.EnumerateArray())
+                {
+                    var message = ParseMessageElement(msgElement, topicArn);
+                    if (message != null)
+                        messages.Add(message);
+                }
+            }
+            else if (root.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var property in root.EnumerateObject())
+                {
+                    if (property.Value.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var msgElement in property.Value.EnumerateArray())
+                        {
+                            var message = ParseMessageElement(msgElement, topicArn);
+                            if (message != null)
+                                messages.Add(message);
+                        }
+                    }
+                }
+            }
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Erro ao parsear JSON de mensagens SNS");
+        }
+
+        return messages.OrderByDescending(m => m.Timestamp).ToList();
+    }
+
+    private SnsMessageInfo? ParseMessageElement(JsonElement element, string topicArn)
+    {
+        try
+        {
+            var messageId = element.TryGetProperty("MessageId", out var idProp)
+                ? idProp.GetString() ?? Guid.NewGuid().ToString()
+                : element.TryGetProperty("messageId", out var idProp2)
+                    ? idProp2.GetString() ?? Guid.NewGuid().ToString()
+                    : Guid.NewGuid().ToString();
+
+            var subject = element.TryGetProperty("Subject", out var subjectProp)
+                ? subjectProp.GetString() ?? string.Empty
+                : element.TryGetProperty("subject", out var subjectProp2)
+                    ? subjectProp2.GetString() ?? string.Empty
+                    : string.Empty;
+
+            var messageBody = element.TryGetProperty("Message", out var msgProp)
+                ? msgProp.GetString() ?? string.Empty
+                : element.TryGetProperty("message", out var msgProp2)
+                    ? msgProp2.GetString() ?? string.Empty
+                    : element.TryGetProperty("body", out var bodyProp)
+                        ? bodyProp.GetString() ?? string.Empty
+                        : string.Empty;
+
+            var timestamp = DateTime.UtcNow;
+            if (element.TryGetProperty("Timestamp", out var tsProp) || element.TryGetProperty("timestamp", out tsProp))
+            {
+                if (tsProp.ValueKind == JsonValueKind.String)
+                {
+                    DateTime.TryParse(tsProp.GetString(), out timestamp);
+                }
+                else if (tsProp.ValueKind == JsonValueKind.Number)
+                {
+                    timestamp = DateTimeOffset.FromUnixTimeMilliseconds(tsProp.GetInt64()).UtcDateTime;
+                }
+            }
+
+            var attributes = new Dictionary<string, string>();
+            if (element.TryGetProperty("MessageAttributes", out var attrProp) || element.TryGetProperty("messageAttributes", out attrProp))
+            {
+                foreach (var attr in attrProp.EnumerateObject())
+                {
+                    if (attr.Value.TryGetProperty("Value", out var valueProp) || attr.Value.TryGetProperty("value", out valueProp))
+                    {
+                        attributes[attr.Name] = valueProp.GetString() ?? string.Empty;
+                    }
+                    else if (attr.Value.ValueKind == JsonValueKind.String)
+                    {
+                        attributes[attr.Name] = attr.Value.GetString() ?? string.Empty;
+                    }
+                }
+            }
+
+            return new SnsMessageInfo(messageId, topicArn, subject, messageBody, timestamp, attributes);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public async Task<OperationResult<string>> CreateTopicAsync(string topicName, Dictionary<string, string>? attributes = null)
     {
         try
@@ -227,7 +392,7 @@ public class SnsService : ISnsService
             }
 
             var response = await _snsClient.CreateTopicAsync(request);
-            
+
             _logger.LogInformation("Tópico SNS {TopicName} criado com sucesso", topicName);
             _notificationService.ShowSuccess($"Tópico '{topicName}' criado com sucesso!");
             return new OperationResult<string>(true, response.TopicArn);
@@ -243,7 +408,7 @@ public class SnsService : ISnsService
     {
         try
         {
-            var finalSubject = string.IsNullOrWhiteSpace(subject) 
+            var finalSubject = string.IsNullOrWhiteSpace(subject)
                 ? $"Mensagem SNS - {DateTime.Now:dd/MM/yyyy HH:mm:ss}"
                 : subject;
 
@@ -266,7 +431,7 @@ public class SnsService : ISnsService
             }
 
             var response = await _snsClient.PublishAsync(request);
-            
+
             _logger.LogInformation("Mensagem publicada no tópico SNS {TopicArn}", topicArn);
             _notificationService.ShowSuccess("Mensagem publicada com sucesso!");
             return new OperationResult<string>(true, response.MessageId);
@@ -295,7 +460,7 @@ public class SnsService : ISnsService
             }
 
             var response = await _snsClient.SubscribeAsync(request);
-            
+
             _logger.LogInformation("Assinatura criada para tópico SNS {TopicArn}", topicArn);
             _notificationService.ShowSuccess("Assinatura criada com sucesso!");
             return new OperationResult<string>(true, response.SubscriptionArn);
@@ -312,7 +477,7 @@ public class SnsService : ISnsService
         try
         {
             await _snsClient.DeleteTopicAsync(topicArn);
-            
+
             _logger.LogInformation("Tópico SNS {TopicArn} excluído com sucesso", topicArn);
             _notificationService.ShowSuccess("Tópico excluído com sucesso!");
             return new OperationResult<bool>(true, true);
@@ -329,7 +494,7 @@ public class SnsService : ISnsService
         try
         {
             await _snsClient.UnsubscribeAsync(subscriptionArn);
-            
+
             _logger.LogInformation("Assinatura SNS {SubscriptionArn} removida com sucesso", subscriptionArn);
             _notificationService.ShowSuccess("Assinatura removida com sucesso!");
             return new OperationResult<bool>(true, true);

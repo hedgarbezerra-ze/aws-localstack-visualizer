@@ -47,7 +47,7 @@ public class LocalStackService : ILocalStackService
     }
 
     public LocalStackService(
-        IOptions<AwsConfiguration> config, 
+        IOptions<AwsConfiguration> config,
         ILogger<LocalStackService> logger,
         IS3Service s3Service,
         ISqsService sqsService,
@@ -190,7 +190,7 @@ public class LocalStackService : ILocalStackService
     public async Task<OperationResult<IReadOnlyList<S3BucketInfo>>> GetS3BucketsAsync()
     {
         const string cacheKey = "s3_buckets";
-        
+
         var cachedResult = await _cacheService.GetAsync<OperationResult<IReadOnlyList<S3BucketInfo>>>(cacheKey);
         if (cachedResult != null)
             return cachedResult;
@@ -208,19 +208,15 @@ public class LocalStackService : ILocalStackService
         }
     }
 
-    public Task<OperationResult<S3BucketDetails>> GetS3BucketDetailsAsync(string bucketName) => 
+    public Task<OperationResult<S3BucketDetails>> GetS3BucketDetailsAsync(string bucketName) =>
         _s3Service.GetBucketDetailsAsync(bucketName);
 
-    public Task<OperationResult<string>> GetS3ObjectContentAsync(string bucketName, string objectKey) => 
+    public Task<OperationResult<string>> GetS3ObjectContentAsync(string bucketName, string objectKey) =>
         _s3Service.GetObjectContentAsync(bucketName, objectKey);
 
     public async Task<OperationResult<IReadOnlyList<SqsQueueInfo>>> GetSqsQueuesAsync()
     {
         const string cacheKey = "sqs_queues";
-        
-        var cachedResult = await _cacheService.GetAsync<OperationResult<IReadOnlyList<SqsQueueInfo>>>(cacheKey);
-        if (cachedResult != null)
-            return cachedResult;
 
         await _sqsSemaphore.WaitAsync();
         try
@@ -235,16 +231,12 @@ public class LocalStackService : ILocalStackService
         }
     }
 
-    public Task<OperationResult<SqsQueueDetails>> GetSqsQueueDetailsAsync(string queueName) => 
+    public Task<OperationResult<SqsQueueDetails>> GetSqsQueueDetailsAsync(string queueName) =>
         _sqsService.GetQueueDetailsAsync(queueName);
 
     public async Task<OperationResult<IReadOnlyList<SnsTopicInfo>>> GetSnsTopicsAsync()
     {
         const string cacheKey = "sns_topics";
-        
-        var cachedResult = await _cacheService.GetAsync<OperationResult<IReadOnlyList<SnsTopicInfo>>>(cacheKey);
-        if (cachedResult != null)
-            return cachedResult;
 
         await _snsSemaphore.WaitAsync();
         try
@@ -259,16 +251,19 @@ public class LocalStackService : ILocalStackService
         }
     }
 
-    public Task<OperationResult<SnsTopicDetails>> GetSnsTopicDetailsAsync(string topicArn) => 
+    public Task<OperationResult<SnsTopicDetails>> GetSnsTopicDetailsAsync(string topicArn) =>
         _snsService.GetTopicDetailsAsync(topicArn);
 
-    public Task<OperationResult<IReadOnlyList<SnsSubscriptionInfo>>> GetSnsSubscriptionsAsync(string topicArn) => 
+    public Task<OperationResult<IReadOnlyList<SnsSubscriptionInfo>>> GetSnsSubscriptionsAsync(string topicArn) =>
         _snsService.GetSubscriptionsAsync(topicArn);
+
+    public Task<OperationResult<IReadOnlyList<SnsMessageInfo>>> GetSnsTopicMessagesAsync(string topicArn) =>
+        _snsService.GetTopicMessagesAsync(topicArn);
 
     public async Task<OperationResult<IReadOnlyList<SecretInfo>>> GetSecretsAsync()
     {
         const string cacheKey = "secrets_manager";
-        
+
         var cachedResult = await _cacheService.GetAsync<OperationResult<IReadOnlyList<SecretInfo>>>(cacheKey);
         if (cachedResult != null)
             return cachedResult;
@@ -286,10 +281,10 @@ public class LocalStackService : ILocalStackService
         }
     }
 
-    public Task<OperationResult<SecretDetails>> GetSecretDetailsAsync(string secretName) => 
+    public Task<OperationResult<SecretDetails>> GetSecretDetailsAsync(string secretName) =>
         _secretsManagerService.GetSecretDetailsAsync(secretName);
 
-    public Task<OperationResult<SecretValue>> GetSecretValueAsync(string secretName, string? versionId = null) => 
+    public Task<OperationResult<SecretValue>> GetSecretValueAsync(string secretName, string? versionId = null) =>
         _secretsManagerService.GetSecretValueAsync(secretName, versionId);
 
     public async Task<OperationResult<string>> CreateSecretAsync(string name, string secretValue, string? description = null)
@@ -352,7 +347,7 @@ public class LocalStackService : ILocalStackService
         return result;
     }
 
-    public Task<OperationResult<byte[]>> DownloadObjectAsync(string bucketName, string objectKey) => 
+    public Task<OperationResult<byte[]>> DownloadObjectAsync(string bucketName, string objectKey) =>
         _s3Service.DownloadObjectAsync(bucketName, objectKey);
 
     public async Task<OperationResult<bool>> DeleteS3BucketAsync(string bucketName, bool force = false)
@@ -385,7 +380,7 @@ public class LocalStackService : ILocalStackService
         return result;
     }
 
-    public Task<OperationResult<string>> SendSqsMessageAsync(string queueUrl, string messageBody, Dictionary<string, string>? messageAttributes = null) => 
+    public Task<OperationResult<string>> SendSqsMessageAsync(string queueUrl, string messageBody, Dictionary<string, string>? messageAttributes = null) =>
         _sqsService.SendMessageAsync(queueUrl, messageBody, messageAttributes);
 
     public async Task<OperationResult<bool>> DeleteSqsQueueAsync(string queueUrl)
@@ -398,7 +393,7 @@ public class LocalStackService : ILocalStackService
         return result;
     }
 
-    public Task<OperationResult<bool>> PurgeSqsQueueAsync(string queueUrl) => 
+    public Task<OperationResult<bool>> PurgeSqsQueueAsync(string queueUrl) =>
         _sqsService.PurgeQueueAsync(queueUrl);
 
     public async Task<OperationResult<string>> CreateSnsTopicAsync(string topicName, Dictionary<string, string>? attributes = null)
@@ -411,7 +406,7 @@ public class LocalStackService : ILocalStackService
         return result;
     }
 
-    public Task<OperationResult<string>> PublishSnsMessageAsync(string topicArn, string message, string? subject = null, Dictionary<string, string>? messageAttributes = null) => 
+    public Task<OperationResult<string>> PublishSnsMessageAsync(string topicArn, string message, string? subject = null, Dictionary<string, string>? messageAttributes = null) =>
         _snsService.PublishMessageAsync(topicArn, message, subject, messageAttributes);
 
     public async Task<OperationResult<string>> SubscribeSnsAsync(string topicArn, string protocol, string endpoint, Dictionary<string, string>? attributes = null)

@@ -36,6 +36,7 @@ public interface ILocalStackService
     Task<OperationResult<IReadOnlyList<SnsTopicInfo>>> GetSnsTopicsAsync();
     Task<OperationResult<SnsTopicDetails>> GetSnsTopicDetailsAsync(string topicArn);
     Task<OperationResult<IReadOnlyList<SnsSubscriptionInfo>>> GetSnsSubscriptionsAsync(string topicArn);
+    Task<OperationResult<IReadOnlyList<SnsMessageInfo>>> GetSnsTopicMessagesAsync(string topicArn);
     Task<OperationResult<string>> CreateSnsTopicAsync(string topicName, Dictionary<string, string>? attributes = null);
     Task<OperationResult<string>> PublishSnsMessageAsync(string topicArn, string message, string? subject = null, Dictionary<string, string>? messageAttributes = null);
     Task<OperationResult<string>> SubscribeSnsAsync(string topicArn, string protocol, string endpoint, Dictionary<string, string>? attributes = null);

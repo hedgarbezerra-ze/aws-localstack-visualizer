@@ -12,6 +12,8 @@ public interface ISnsService
 
     Task<OperationResult<IReadOnlyList<SnsSubscriptionInfo>>> GetSubscriptionsAsync(string topicArn);
 
+    Task<OperationResult<IReadOnlyList<SnsMessageInfo>>> GetTopicMessagesAsync(string topicArn);
+
     Task<OperationResult<string>> CreateTopicAsync(string topicName, Dictionary<string, string>? attributes = null);
 
     Task<OperationResult<string>> PublishMessageAsync(string topicArn, string message, string? subject = null, Dictionary<string, string>? messageAttributes = null);

@@ -65,6 +65,16 @@ docker run -d -p 8081:8080 --name aws-localstack-visualizer aws-localstack-visua
 ```bash
 # Executar com LocalStack
 dotnet run --environment Development
+
+# Ou especificando o projeto e perfil
+dotnet run --project AwsLocalStackVisualizer/AwsLocalStackVisualizer.csproj --launch-profile LocalStack
+
+# Comando universal (funciona de qualquer local)
+dotnet run --project "C:\Users\99846737\RiderProjects\aws-localstack-visualizer\AwsLocalStackVisualizer\AwsLocalStackVisualizer.csproj" --launch-profile LocalStack
+
+# Scripts automatizados (duplo clique para executar)
+# Windows Batch: run-localstack.bat
+# PowerShell: run-localstack.ps1
 ```
 - **Acesso**: http://localhost:5266
 - **LocalStack**: http://localhost:4566

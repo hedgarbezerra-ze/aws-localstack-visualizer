@@ -95,9 +95,13 @@
                                             @topic.Name
                                         </h5>
                                         <div class="row text-center mb-3">
-                                            <div class="col-12">
+                                            <div class="col-6">
                                                 <h6 class="text-primary mb-0">@topic.SubscriptionsCount</h6>
                                                 <small class="text-muted">Assinaturas</small>
+                                            </div>
+                                            <div class="col-6">
+                                                <h6 class="text-info mb-0">@GetTopicMessageCount(topic.Arn)</h6>
+                                                <small class="text-muted">Mensagens</small>
                                             </div>
                                         </div>
                                         <hr>
@@ -114,16 +118,16 @@
                                     </div>
                                     <div class="card-footer">
                                         <div class="d-grid gap-2">
-                                            <button class="btn btn-warning btn-sm" 
+                                            <button class="btn btn-warning btn-sm"
                                                     @onclick="() => NavigateToTopic(topic.Arn)">
                                                 <i class="bi bi-eye"></i> Visualizar Assinaturas
                                             </button>
                                             <div class="btn-group">
-                                                <button class="btn btn-outline-success btn-sm" 
+                                                <button class="btn btn-outline-success btn-sm"
                                                         @onclick="() => ShowPublishMessageModal(topic.Arn, topic.Name)">
                                                     <i class="bi bi-megaphone"></i> Publicar
                                                 </button>
-                                                <button class="btn btn-outline-danger btn-sm" 
+                                                <button class="btn btn-outline-danger btn-sm"
                                                         @onclick="() => ShowDeleteTopicModal(topic.Arn, topic.Name)"
                                                         disabled="@ReadOnlyService.IsReadOnly">
                                                     <i class="bi bi-trash"></i> Excluir
@@ -135,7 +139,7 @@
                             </div>
                         }
                     </div>
-                    
+
                     @if (totalPages > 1)
                     {
                         <div class="row mt-4">
@@ -147,7 +151,7 @@
                                                 <i class="bi bi-chevron-left"></i> Anterior
                                             </button>
                                         </li>
-                                        
+
                                         @for (int page = 1; page <= totalPages; page++)
                                         {
                                             var pageNumber = page;
@@ -157,7 +161,7 @@
                                                 </button>
                                             </li>
                                         }
-                                        
+
                                         <li class="page-item @(currentPage == totalPages ? "disabled" : "")">
                                             <button class="page-link" @onclick="() => GoToPage(currentPage + 1)" disabled="@(currentPage == totalPages)">
                                                 Próxima <i class="bi bi-chevron-right"></i>
@@ -200,11 +204,15 @@
                                 </button>
                             </div>
                             <div class="row mb-3">
-                                <div class="col-md-4">
-                                    <strong>Assinaturas:</strong> 
+                                <div class="col-md-3">
+                                    <strong>Assinaturas:</strong>
                                     <span class="badge bg-primary">@topicDetails.TopicInfo.SubscriptionsCount</span>
                                 </div>
-                                <div class="col-md-8">
+                                <div class="col-md-3">
+                                    <strong>Mensagens:</strong>
+                                    <span class="badge bg-info">@topicDetails.MessageCount</span>
+                                </div>
+                                <div class="col-md-6">
                                     <strong>Criado em:</strong> @topicDetails.TopicInfo.CreatedDate.ToString("dd/MM/yyyy HH:mm:ss")
                                 </div>
                             </div>
@@ -263,7 +271,7 @@
                                             </td>
                                             <td>@subscription.Owner</td>
                                             <td>
-                                                @if (!string.IsNullOrEmpty(subscription.SubscriptionArn) && 
+                                                @if (!string.IsNullOrEmpty(subscription.SubscriptionArn) &&
                                                      subscription.SubscriptionArn != "PendingConfirmation")
                                                 {
                                                     <code class="small">@subscription.SubscriptionArn</code>
@@ -286,11 +294,11 @@
                                     var groupedSubscriptions = topicDetails.Subscriptions
                                         .GroupBy(s => s.Protocol)
                                         .ToDictionary(g => g.Key, g => g.Count());
-                                    
+
                                     var confirmedCount = topicDetails.Subscriptions.Count(s => s.ConfirmationWasAuthenticated);
                                     var pendingCount = topicDetails.Subscriptions.Count(s => !s.ConfirmationWasAuthenticated);
                                 }
-                                
+
                                 <div class="col-md-3 mb-3">
                                     <div class="card text-center">
                                         <div class="card-body">
@@ -307,7 +315,7 @@
                                         </div>
                                     </div>
                                 </div>
-                                
+
                                 @foreach (var protocolGroup in groupedSubscriptions)
                                 {
                                     <div class="col-md-3 mb-3">
@@ -329,6 +337,94 @@
                             <p>Este tópico não possui assinaturas configuradas.</p>
                             <small class="text-muted">
                                 Assinaturas podem ser criadas através do AWS CLI ou SDKs.
+                            </small>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="row mt-4">
+                <div class="col-12">
+                    <h4>Mensagens Publicadas</h4>
+                    @if (topicDetails.Messages.Any())
+                    {
+                        <div class="alert alert-info" role="alert">
+                            <i class="bi bi-info-circle"></i>
+                            <strong>Informação:</strong> Estas são as mensagens publicadas neste tópico (disponível apenas no LocalStack).
+                        </div>
+
+                        @foreach (var message in topicDetails.Messages)
+                        {
+                            <div class="card mb-3">
+                                <div class="card-header">
+                                    <div class="row align-items-center">
+                                        <div class="col-md-8">
+                                            <h6 class="mb-0">
+                                                <i class="bi bi-envelope-fill text-warning"></i>
+                                                @if (!string.IsNullOrEmpty(message.Subject))
+                                                {
+                                                    @message.Subject
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted">Mensagem: @message.MessageId[..Math.Min(8, message.MessageId.Length)]...</span>
+                                                }
+                                            </h6>
+                                        </div>
+                                        <div class="col-md-4 text-end">
+                                            <small class="text-muted">
+                                                @message.Timestamp.ToString("dd/MM/yyyy HH:mm:ss")
+                                            </small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row mb-2">
+                                        <div class="col-12">
+                                            <strong>Message ID:</strong>
+                                            <code class="small">@message.MessageId</code>
+                                        </div>
+                                    </div>
+
+                                    <h6>Conteúdo da Mensagem:</h6>
+                                    <div class="bg-light p-3 rounded">
+                                        <pre class="mb-0" style="white-space: pre-wrap; word-break: break-word;">@FormatMessageBody(message.Message)</pre>
+                                    </div>
+
+                                    @if (message.MessageAttributes.Any())
+                                    {
+                                        <h6 class="mt-3">Atributos:</h6>
+                                        <div class="table-responsive">
+                                            <table class="table table-sm">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Atributo</th>
+                                                        <th>Valor</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    @foreach (var attr in message.MessageAttributes)
+                                                    {
+                                                        <tr>
+                                                            <td><code>@attr.Key</code></td>
+                                                            <td>@attr.Value</td>
+                                                        </tr>
+                                                    }
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <div class="alert alert-info" role="alert">
+                            <h4 class="alert-heading">Nenhuma mensagem disponível</h4>
+                            <p>Este tópico não possui mensagens publicadas ou o recurso de visualização de mensagens não está disponível.</p>
+                            <small class="text-muted">
+                                As mensagens são disponibilizadas apenas no LocalStack através da API interna.
                             </small>
                         </div>
                     }
@@ -386,10 +482,10 @@
                     <div class="mb-3">
                         <label for="publishMessage" class="form-label">Mensagem</label>
                         <div class="position-relative">
-                            <textarea class="form-control font-monospace" 
-                                      id="publishMessage" 
-                                      rows="12" 
-                                      @bind="publishMessage" 
+                            <textarea class="form-control font-monospace"
+                                      id="publishMessage"
+                                      rows="12"
+                                      @bind="publishMessage"
                                       @oninput="OnPublishMessageInput"
                                       placeholder="Digite a mensagem a ser publicada..."
                                       style="resize: vertical; font-size: 14px; line-height: 1.4;"></textarea>
@@ -472,29 +568,29 @@
     private SnsTopicDetails? topicDetails;
     private bool isLoading = true;
     private bool hasError = false;
-    
+
     private int currentPage = 1;
     private const int itemsPerPage = 6;
     private int totalPages => (int)Math.Ceiling((double)topics.Count / itemsPerPage);
     private List<SnsTopicInfo> paginatedTopics => topics.Skip((currentPage - 1) * itemsPerPage).Take(itemsPerPage).ToList();
-    
+
     private bool showCreateTopicModal = false;
     private string newTopicName = string.Empty;
     private bool isCreatingTopic = false;
-    
+
     private bool showPublishMessageModal = false;
     private string publishMessage = string.Empty;
     private string publishSubject = string.Empty;
     private bool isPublishingMessage = false;
     private bool isValidPublishJson = false;
     private string? publishJsonValidationMessage = null;
-    
-    
+
+
     private bool showDeleteTopicModal = false;
     private string topicToDelete = string.Empty;
     private string topicNameToDelete = string.Empty;
     private bool isDeletingTopic = false;
-    
+
     private string selectedTopicArn = string.Empty;
     private string selectedTopicName = string.Empty;
 
@@ -521,6 +617,7 @@
                 var result = await LocalStackService.GetSnsTopicsAsync();
                 topics = result.IsSuccess && result.Data != null ? result.Data.ToList() : new List<SnsTopicInfo>();
                 topicDetails = null;
+                await LoadTopicMessageCounts();
             }
             else
             {
@@ -625,7 +722,7 @@
         publishMessage = string.Empty;
         publishSubject = string.Empty;
         showPublishMessageModal = true;
-        
+
         if (!string.IsNullOrEmpty(topicArn) && !string.IsNullOrEmpty(topicName))
         {
             selectedTopicArn = topicArn;
@@ -656,7 +753,7 @@
         {
             topicArn = selectedTopicArn;
         }
-        
+
         if (string.IsNullOrEmpty(topicArn))
             return;
 
@@ -665,10 +762,10 @@
 
         try
         {
-            var finalSubject = string.IsNullOrWhiteSpace(publishSubject) 
-                ? $"Mensagem SNS - {DateTime.Now:dd/MM/yyyy HH:mm:ss}" 
+            var finalSubject = string.IsNullOrWhiteSpace(publishSubject)
+                ? $"Mensagem SNS - {DateTime.Now:dd/MM/yyyy HH:mm:ss}"
                 : publishSubject;
-                
+
             var result = await LocalStackService.PublishSnsMessageAsync(topicArn, publishMessage, finalSubject);
             if (result.IsSuccess)
             {
@@ -727,8 +824,8 @@
         try
         {
             var jsonDoc = System.Text.Json.JsonDocument.Parse(publishMessage);
-            publishMessage = System.Text.Json.JsonSerializer.Serialize(jsonDoc, new System.Text.Json.JsonSerializerOptions 
-            { 
+            publishMessage = System.Text.Json.JsonSerializer.Serialize(jsonDoc, new System.Text.Json.JsonSerializerOptions
+            {
                 WriteIndented = true,
                 Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
             });
@@ -797,6 +894,55 @@
             currentPage = page;
             StateHasChanged();
         }
+    }
+
+    private string FormatMessageBody(string body)
+    {
+        try
+        {
+            if (body.TrimStart().StartsWith("{") || body.TrimStart().StartsWith("["))
+            {
+                var jsonDoc = System.Text.Json.JsonDocument.Parse(body);
+                return System.Text.Json.JsonSerializer.Serialize(jsonDoc, new System.Text.Json.JsonSerializerOptions
+                {
+                    WriteIndented = true
+                });
+            }
+        }
+        catch
+        {
+        }
+
+        return body;
+    }
+
+    private Dictionary<string, int> topicMessageCounts = new();
+
+    private int GetTopicMessageCount(string topicArn)
+    {
+        if (topicMessageCounts.TryGetValue(topicArn, out var count))
+            return count;
+        return 0;
+    }
+
+    private async Task LoadTopicMessageCounts()
+    {
+        foreach (var topic in topics)
+        {
+            try
+            {
+                var result = await LocalStackService.GetSnsTopicMessagesAsync(topic.Arn);
+                if (result.IsSuccess && result.Data != null)
+                {
+                    topicMessageCounts[topic.Arn] = result.Data.Count;
+                }
+            }
+            catch
+            {
+                topicMessageCounts[topic.Arn] = 0;
+            }
+        }
+        StateHasChanged();
     }
 }
 
