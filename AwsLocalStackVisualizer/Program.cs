@@ -1,13 +1,10 @@
-using Amazon.S3;
-using Amazon.SQS;
-using Amazon.SimpleNotificationService;
-using Amazon.SecretsManager;
 using AwsLocalStackVisualizer.Abstractions;
 using AwsLocalStackVisualizer.Components;
 using AwsLocalStackVisualizer.Configuration;
 using AwsLocalStackVisualizer.Services;
 using AwsLocalStackVisualizer.Services.AWS;
 using AwsLocalStackVisualizer.Handlers;
+using Microsoft.Extensions.Options;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -18,13 +15,12 @@ builder.Host.UseSerilog((context, configuration) =>
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddProblemDetails();
 
-builder.Services.Configure<AwsConfiguration>(
-    builder.Configuration.GetSection("AWS"));
-
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 var awsConfig = builder.Configuration.GetSection("AWS").Get<AwsConfiguration>() ?? new AwsConfiguration();
+
+builder.Services.AddSingleton<IOptions<AwsConfiguration>>(_ => Options.Create(awsConfig));
 
 using var loggerFactory = LoggerFactory.Create(builder => builder.AddSerilog());
 var logger = loggerFactory.CreateLogger("AWS.Configuration");
@@ -33,33 +29,8 @@ var credentials = AwsCredentialsFactory.CreateCredentials(awsConfig, logger);
 
 builder.Services.AddSingleton(credentials);
 
-builder.Services.AddSingleton<AmazonS3Client>(provider =>
-{
-    var s3Client = AwsClientFactory.CreateS3Client(credentials, awsConfig);
-    logger.LogInformation("S3 Client configurado para {Environment}", awsConfig.UseLocalStack ? "LocalStack" : "AWS Real");
-    return s3Client;
-});
-
-builder.Services.AddSingleton<AmazonSQSClient>(provider =>
-{
-    var sqsClient = AwsClientFactory.CreateSqsClient(credentials, awsConfig);
-    logger.LogInformation("SQS Client configurado para {Environment}", awsConfig.UseLocalStack ? "LocalStack" : "AWS Real");
-    return sqsClient;
-});
-
-builder.Services.AddSingleton<AmazonSimpleNotificationServiceClient>(provider =>
-{
-    var snsClient = AwsClientFactory.CreateSnsClient(credentials, awsConfig);
-    logger.LogInformation("SNS Client configurado para {Environment}", awsConfig.UseLocalStack ? "LocalStack" : "AWS Real");
-    return snsClient;
-});
-
-builder.Services.AddSingleton<AmazonSecretsManagerClient>(provider =>
-{
-    var secretsClient = AwsClientFactory.CreateSecretsManagerClient(credentials, awsConfig);
-    logger.LogInformation("SecretsManager Client configurado para {Environment}", awsConfig.UseLocalStack ? "LocalStack" : "AWS Real");
-    return secretsClient;
-});
+builder.Services.AddScoped<AwsRegionContext>();
+builder.Services.AddScoped<IAppAwsClients, AppAwsClients>();
 
 builder.Services.AddHttpClient();
 

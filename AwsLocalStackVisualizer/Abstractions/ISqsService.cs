@@ -17,4 +17,8 @@ public interface ISqsService
     Task<OperationResult<bool>> DeleteQueueAsync(string queueUrl);
 
     Task<OperationResult<bool>> PurgeQueueAsync(string queueUrl);
+
+    Task<OperationResult<string>> GetQueueArnAsync(string queueUrl);
+
+    Task<OperationResult<bool>> EnsureQueuePolicyAllowsSnsAsync(string queueUrl, string queueArn, string topicArn);
 }

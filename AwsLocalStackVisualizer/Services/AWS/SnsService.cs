@@ -13,20 +13,20 @@ namespace AwsLocalStackVisualizer.Services.AWS;
 
 public class SnsService : ISnsService
 {
-    private readonly AmazonSimpleNotificationServiceClient _snsClient;
+    private readonly IAppAwsClients _awsClients;
     private readonly ILogger<SnsService> _logger;
     private readonly INotificationService _notificationService;
     private readonly HttpClient _httpClient;
     private readonly string _localStackUrl;
 
     public SnsService(
-        AmazonSimpleNotificationServiceClient snsClient,
+        IAppAwsClients awsClients,
         ILogger<SnsService> logger,
         INotificationService notificationService,
         HttpClient httpClient,
         IOptions<AwsConfiguration> config)
     {
-        _snsClient = snsClient ?? throw new ArgumentNullException(nameof(snsClient));
+        _awsClients = awsClients ?? throw new ArgumentNullException(nameof(awsClients));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
@@ -37,7 +37,7 @@ public class SnsService : ISnsService
     {
         try
         {
-            var response = await _snsClient.ListTopicsAsync();
+            var response = await _awsClients.SNS.ListTopicsAsync();
 
             if (response is { Topics: null or { Count: 0 } })
             {
@@ -75,7 +75,7 @@ public class SnsService : ISnsService
         List<Task<SnsTopicInfo?>> validTopics;
         try
         {
-            var response = await _snsClient.ListTopicsAsync();
+            var response = await _awsClients.SNS.ListTopicsAsync();
 
             if (response is { Topics: null or { Count: 0 } })
             {
@@ -126,7 +126,7 @@ public class SnsService : ISnsService
                 return null;
             }
 
-            var subscriptions = await _snsClient.ListSubscriptionsByTopicAsync(topicArn);
+            var subscriptions = await _awsClients.SNS.ListSubscriptionsByTopicAsync(topicArn);
             var subscriptionCount = subscriptions?.Subscriptions?.Count ?? 0;
 
             return new SnsTopicInfo(
@@ -172,7 +172,7 @@ public class SnsService : ISnsService
                 topicInfo = new SnsTopicInfo(topicName, topicArn, 0, DateTime.UtcNow);
             }
 
-            var response = await _snsClient.ListSubscriptionsByTopicAsync(topicArn);
+            var response = await _awsClients.SNS.ListSubscriptionsByTopicAsync(topicArn);
             var messagesResult = await GetTopicMessagesAsync(topicArn);
             var messages = messagesResult.IsSuccess && messagesResult.Data != null
                 ? messagesResult.Data
@@ -206,7 +206,7 @@ public class SnsService : ISnsService
     {
         try
         {
-            var response = await _snsClient.ListSubscriptionsByTopicAsync(topicArn);
+            var response = await _awsClients.SNS.ListSubscriptionsByTopicAsync(topicArn);
             if(response is { Subscriptions: null or { Capacity: 0 } })
                 return new OperationResult<IReadOnlyList<SnsSubscriptionInfo>>(true, []);
 
@@ -391,7 +391,7 @@ public class SnsService : ISnsService
                 request.Attributes = attributes;
             }
 
-            var response = await _snsClient.CreateTopicAsync(request);
+            var response = await _awsClients.SNS.CreateTopicAsync(request);
 
             _logger.LogInformation("Tópico SNS {TopicName} criado com sucesso", topicName);
             _notificationService.ShowSuccess($"Tópico '{topicName}' criado com sucesso!");
@@ -430,7 +430,7 @@ public class SnsService : ISnsService
                     });
             }
 
-            var response = await _snsClient.PublishAsync(request);
+            var response = await _awsClients.SNS.PublishAsync(request);
 
             _logger.LogInformation("Mensagem publicada no tópico SNS {TopicArn}", topicArn);
             _notificationService.ShowSuccess("Mensagem publicada com sucesso!");
@@ -459,7 +459,7 @@ public class SnsService : ISnsService
                 request.Attributes = attributes;
             }
 
-            var response = await _snsClient.SubscribeAsync(request);
+            var response = await _awsClients.SNS.SubscribeAsync(request);
 
             _logger.LogInformation("Assinatura criada para tópico SNS {TopicArn}", topicArn);
             _notificationService.ShowSuccess("Assinatura criada com sucesso!");
@@ -476,7 +476,7 @@ public class SnsService : ISnsService
     {
         try
         {
-            await _snsClient.DeleteTopicAsync(topicArn);
+            await _awsClients.SNS.DeleteTopicAsync(topicArn);
 
             _logger.LogInformation("Tópico SNS {TopicArn} excluído com sucesso", topicArn);
             _notificationService.ShowSuccess("Tópico excluído com sucesso!");
@@ -493,7 +493,7 @@ public class SnsService : ISnsService
     {
         try
         {
-            await _snsClient.UnsubscribeAsync(subscriptionArn);
+            await _awsClients.SNS.UnsubscribeAsync(subscriptionArn);
 
             _logger.LogInformation("Assinatura SNS {SubscriptionArn} removida com sucesso", subscriptionArn);
             _notificationService.ShowSuccess("Assinatura removida com sucesso!");

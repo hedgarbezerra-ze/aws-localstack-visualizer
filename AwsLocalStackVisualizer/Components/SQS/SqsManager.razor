@@ -4,10 +4,13 @@
 @using AwsLocalStackVisualizer.Models.SQS
 @using AwsLocalStackVisualizer.Models.SNS
 @using AwsLocalStackVisualizer.Services
+@using AwsLocalStackVisualizer.Configuration
 @inject ILocalStackService LocalStackService
 @inject IReadOnlyService ReadOnlyService
 @inject IJSRuntime JSRuntime
 @inject NavigationManager Navigation
+@inject AwsRegionContext RegionContext
+@implements IDisposable
 @rendermode InteractiveServer
 
 <PageTitle>SQS Manager - LocalStack Visualizer</PageTitle>
@@ -650,6 +653,11 @@
     private bool isDeletingQueue = false;
     private bool isPurgingQueue = false;
 
+    protected override void OnInitialized()
+    {
+        RegionContext.RegionChanged += OnRegionChangedRefreshContent;
+    }
+
     protected override async Task OnInitializedAsync()
     {
         await LoadData();
@@ -658,6 +666,20 @@
     protected override async Task OnParametersSetAsync()
     {
         await LoadData();
+    }
+
+    private void OnRegionChangedRefreshContent()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            await LoadData();
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        RegionContext.RegionChanged -= OnRegionChangedRefreshContent;
     }
 
     private async Task LoadData()
@@ -962,14 +984,18 @@
         
         try
         {
-            var queueArn = ConvertQueueUrlToArn(queueUrl);
-            
+            var arnResult = await LocalStackService.GetSqsQueueArnAsync(queueUrl);
+            if (!arnResult.IsSuccess || string.IsNullOrWhiteSpace(arnResult.Data))
+                return;
+
+            var queueArn = arnResult.Data;
+
             foreach (var topic in availableTopics)
             {
                 var subscriptionsResult = await LocalStackService.GetSnsSubscriptionsAsync(topic.Arn);
                 if (subscriptionsResult.IsSuccess && subscriptionsResult.Data != null)
                 {
-                    var isSubscribed = subscriptionsResult.Data.Any(s => s.Endpoint == queueArn);
+                    var isSubscribed = subscriptionsResult.Data.Any(s => string.Equals(s.Endpoint, queueArn, StringComparison.Ordinal));
                     
                     if (isSubscribed)
                     {
@@ -994,14 +1020,18 @@
             var topicsResult = await LocalStackService.GetSnsTopicsAsync();
             if (topicsResult.IsSuccess && topicsResult.Data != null)
             {
-                var queueArn = ConvertQueueUrlToArn(queueDetails.QueueInfo.Url);
-                
+                var arnResult = await LocalStackService.GetSqsQueueArnAsync(queueDetails.QueueInfo.Url);
+                if (!arnResult.IsSuccess || string.IsNullOrWhiteSpace(arnResult.Data))
+                    return;
+
+                var queueArn = arnResult.Data;
+
                 foreach (var topic in topicsResult.Data)
                 {
                     var subscriptionsResult = await LocalStackService.GetSnsSubscriptionsAsync(topic.Arn);
                     if (subscriptionsResult.IsSuccess && subscriptionsResult.Data != null)
                     {
-                        var isSubscribed = subscriptionsResult.Data.Any(s => s.Endpoint == queueArn);
+                        var isSubscribed = subscriptionsResult.Data.Any(s => string.Equals(s.Endpoint, queueArn, StringComparison.Ordinal));
                         
                         if (isSubscribed)
                         {
@@ -1040,21 +1070,6 @@
         return parts.Length > 0 ? parts[^1] : topicArn;
     }
 
-    private string ConvertQueueUrlToArn(string queueUrl)
-    {
-        if (string.IsNullOrEmpty(queueUrl)) return string.Empty;
-        
-        var parts = queueUrl.Split('/');
-        if (parts.Length >= 3)
-        {
-            var accountId = parts[^2];
-            var queueName = parts[^1];
-            return $"arn:aws:sqs:us-west-2:{accountId}:{queueName}";
-        }
-        
-        return queueUrl;
-    }
-
     private async Task SubscribeToSnsTopics()
     {
         if (!selectedTopicArns.Any())
@@ -1078,22 +1093,17 @@
 
         try
         {
-            var queueArn = ConvertQueueUrlToArn(queueUrl);
-            
             foreach (var topicArn in selectedTopicArns)
             {
-                var result = await LocalStackService.SubscribeSnsAsync(topicArn, "sqs", queueArn);
-            if (result.IsSuccess)
-            {
-                    if (!subscribedTopicArns.Contains(topicArn))
-                    {
-                        subscribedTopicArns.Add(topicArn);
-                    }
+                var result = await LocalStackService.SubscribeQueueToSnsTopicAsync(queueUrl, topicArn);
+                if (result.IsSuccess && !subscribedTopicArns.Contains(topicArn))
+                {
+                    subscribedTopicArns.Add(topicArn);
                 }
             }
-            
-                HideSubscribeToSnsModal();
-                await LoadData();
+
+            HideSubscribeToSnsModal();
+            await LoadData();
         }
         finally
         {

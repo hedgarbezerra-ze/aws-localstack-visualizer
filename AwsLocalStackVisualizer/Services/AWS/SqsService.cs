@@ -1,21 +1,24 @@
 using Amazon.SQS;
 using Amazon.SQS.Model;
 using AwsLocalStackVisualizer.Abstractions;
+using AwsLocalStackVisualizer.Configuration;
 using AwsLocalStackVisualizer.Models.Common;
 using AwsLocalStackVisualizer.Models.SQS;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace AwsLocalStackVisualizer.Services.AWS;
 
 public class SqsService : ISqsService
 {
-    private readonly AmazonSQSClient _sqsClient;
+    private readonly IAppAwsClients _awsClients;
     private readonly ILogger<SqsService> _logger;
     private readonly INotificationService _notificationService;
 
-    public SqsService(AmazonSQSClient sqsClient, ILogger<SqsService> logger, INotificationService notificationService)
+    public SqsService(IAppAwsClients awsClients, ILogger<SqsService> logger, INotificationService notificationService)
     {
-        _sqsClient = sqsClient ?? throw new ArgumentNullException(nameof(sqsClient));
+        _awsClients = awsClients ?? throw new ArgumentNullException(nameof(awsClients));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
     }
@@ -24,7 +27,7 @@ public class SqsService : ISqsService
     {
         try
         {
-            var response = await _sqsClient.ListQueuesAsync(new ListQueuesRequest());
+            var response = await _awsClients.SQS.ListQueuesAsync(new ListQueuesRequest());
             
             if (response is not { QueueUrls: { } queueUrlsList })
             {
@@ -62,7 +65,7 @@ public class SqsService : ISqsService
         List<Task<SqsQueueInfo?>> validQueues;
         try
         {
-            var response = await _sqsClient.ListQueuesAsync(new ListQueuesRequest());
+            var response = await _awsClients.SQS.ListQueuesAsync(new ListQueuesRequest());
             
             if (response is not { QueueUrls: { } queueUrlsList })
             {
@@ -113,7 +116,7 @@ public class SqsService : ISqsService
                 return null;
             }
 
-            var attributes = await _sqsClient.GetQueueAttributesAsync(queueUrl, new List<string> 
+            var attributes = await _awsClients.SQS.GetQueueAttributesAsync(queueUrl, new List<string> 
             { 
                 "ApproximateNumberOfMessages", 
                 "ApproximateNumberOfMessagesNotVisible",
@@ -171,7 +174,7 @@ public class SqsService : ISqsService
             }
 
             var messages = new List<SqsMessageInfo>();
-            var response = await _sqsClient.ReceiveMessageAsync(new ReceiveMessageRequest
+            var response = await _awsClients.SQS.ReceiveMessageAsync(new ReceiveMessageRequest
             {
                 QueueUrl = queueInfo.Url,
                 MaxNumberOfMessages = 10,
@@ -235,7 +238,7 @@ public class SqsService : ISqsService
                 request.Attributes = attributes;
             }
 
-            var response = await _sqsClient.CreateQueueAsync(request);
+            var response = await _awsClients.SQS.CreateQueueAsync(request);
             
             _logger.LogInformation("Fila SQS {QueueName} criada com sucesso", queueName);
             _notificationService.ShowSuccess($"Fila '{queueName}' criada com sucesso!");
@@ -269,7 +272,7 @@ public class SqsService : ISqsService
                     });
             }
 
-            var response = await _sqsClient.SendMessageAsync(request);
+            var response = await _awsClients.SQS.SendMessageAsync(request);
             
             _logger.LogInformation("Mensagem enviada para fila SQS {QueueUrl}", queueUrl);
             _notificationService.ShowSuccess("Mensagem enviada com sucesso!");
@@ -286,7 +289,7 @@ public class SqsService : ISqsService
     {
         try
         {
-            await _sqsClient.DeleteQueueAsync(queueUrl);
+            await _awsClients.SQS.DeleteQueueAsync(queueUrl);
             
             _logger.LogInformation("Fila SQS {QueueUrl} excluída com sucesso", queueUrl);
             _notificationService.ShowSuccess("Fila excluída com sucesso!");
@@ -303,7 +306,7 @@ public class SqsService : ISqsService
     {
         try
         {
-            await _sqsClient.PurgeQueueAsync(queueUrl);
+            await _awsClients.SQS.PurgeQueueAsync(queueUrl);
             
             _logger.LogInformation("Fila SQS {QueueUrl} limpa com sucesso", queueUrl);
             _notificationService.ShowSuccess("Fila limpa com sucesso!");
@@ -312,6 +315,95 @@ public class SqsService : ISqsService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao limpar fila SQS {QueueUrl}", queueUrl);
+            return new OperationResult<bool>(false, false, ex.Message, ex);
+        }
+    }
+
+    public async Task<OperationResult<string>> GetQueueArnAsync(string queueUrl)
+    {
+        try
+        {
+            var response = await _awsClients.SQS.GetQueueAttributesAsync(queueUrl, new List<string> { "QueueArn" });
+            if (response.Attributes != null &&
+                response.Attributes.TryGetValue("QueueArn", out var arn) &&
+                !string.IsNullOrWhiteSpace(arn))
+            {
+                return new OperationResult<string>(true, arn);
+            }
+
+            return new OperationResult<string>(false, null, "QueueArn não encontrado");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao obter ARN da fila {QueueUrl}", queueUrl);
+            return new OperationResult<string>(false, null, ex.Message, ex);
+        }
+    }
+
+    public async Task<OperationResult<bool>> EnsureQueuePolicyAllowsSnsAsync(string queueUrl, string queueArn, string topicArn)
+    {
+        try
+        {
+            var current = await _awsClients.SQS.GetQueueAttributesAsync(queueUrl, new List<string> { "Policy" });
+
+            JsonObject root;
+            JsonArray statementArray;
+
+            if (current.Attributes != null &&
+                current.Attributes.TryGetValue("Policy", out var existingJson) &&
+                !string.IsNullOrWhiteSpace(existingJson))
+            {
+                var parsed = JsonNode.Parse(existingJson);
+                root = parsed as JsonObject ?? new JsonObject { ["Version"] = "2012-10-17" };
+                statementArray = root["Statement"] switch
+                {
+                    JsonArray a => a,
+                    JsonObject o => new JsonArray(o),
+                    _ => new JsonArray()
+                };
+            }
+            else
+            {
+                root = new JsonObject { ["Version"] = "2012-10-17" };
+                statementArray = new JsonArray();
+            }
+
+            foreach (var node in statementArray)
+            {
+                var sourceArn = node?["Condition"]?["ArnEquals"]?["aws:SourceArn"]?.GetValue<string>();
+                if (string.Equals(sourceArn, topicArn, StringComparison.Ordinal))
+                    return new OperationResult<bool>(true, true);
+            }
+
+            var newStatement = new JsonObject
+            {
+                ["Sid"] = $"sns-{Guid.NewGuid():N}",
+                ["Effect"] = "Allow",
+                ["Principal"] = new JsonObject { ["Service"] = "sns.amazonaws.com" },
+                ["Action"] = "sqs:SendMessage",
+                ["Resource"] = queueArn,
+                ["Condition"] = new JsonObject
+                {
+                    ["ArnEquals"] = new JsonObject { ["aws:SourceArn"] = topicArn }
+                }
+            };
+
+            statementArray.Add(newStatement);
+            root["Statement"] = statementArray;
+
+            var policyJson = root.ToJsonString();
+
+            await _awsClients.SQS.SetQueueAttributesAsync(new SetQueueAttributesRequest
+            {
+                QueueUrl = queueUrl,
+                Attributes = new Dictionary<string, string> { ["Policy"] = policyJson }
+            });
+
+            return new OperationResult<bool>(true, true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao definir política SNS para fila {QueueUrl}", queueUrl);
             return new OperationResult<bool>(false, false, ex.Message, ex);
         }
     }

@@ -14,6 +14,7 @@ namespace AwsLocalStackVisualizer.Services;
 public class LocalStackService : ILocalStackService
 {
     private readonly AwsConfiguration _config;
+    private readonly AwsRegionContext _regionContext;
     private readonly ILogger<LocalStackService> _logger;
     private readonly IS3Service _s3Service;
     private readonly ISqsService _sqsService;
@@ -26,28 +27,37 @@ public class LocalStackService : ILocalStackService
     private readonly SemaphoreSlim _snsSemaphore = new(1, 1);
     private readonly SemaphoreSlim _secretsSemaphore = new(1, 1);
 
+    private string S3CacheKey => $"s3_buckets:{_regionContext.Region}";
+
+    private string SqsCacheKey => $"sqs_queues:{_regionContext.Region}";
+
+    private string SnsCacheKey => $"sns_topics:{_regionContext.Region}";
+
+    private string SecretsCacheKey => $"secrets_manager:{_regionContext.Region}";
+
     private async Task InvalidateS3CacheAsync()
     {
-        await _cacheService.RemoveAsync("s3_buckets");
+        await _cacheService.RemoveAsync(S3CacheKey);
     }
 
     private async Task InvalidateSqsCacheAsync()
     {
-        await _cacheService.RemoveAsync("sqs_queues");
+        await _cacheService.RemoveAsync(SqsCacheKey);
     }
 
     private async Task InvalidateSnsCacheAsync()
     {
-        await _cacheService.RemoveAsync("sns_topics");
+        await _cacheService.RemoveAsync(SnsCacheKey);
     }
 
     private async Task InvalidateSecretsCacheAsync()
     {
-        await _cacheService.RemoveAsync("secrets_manager");
+        await _cacheService.RemoveAsync(SecretsCacheKey);
     }
 
     public LocalStackService(
         IOptions<AwsConfiguration> config,
+        AwsRegionContext regionContext,
         ILogger<LocalStackService> logger,
         IS3Service s3Service,
         ISqsService sqsService,
@@ -56,6 +66,7 @@ public class LocalStackService : ILocalStackService
         ICacheService cacheService)
     {
         _config = config.Value;
+        _regionContext = regionContext;
         _logger = logger;
         _s3Service = s3Service;
         _sqsService = sqsService;
@@ -189,7 +200,7 @@ public class LocalStackService : ILocalStackService
 
     public async Task<OperationResult<IReadOnlyList<S3BucketInfo>>> GetS3BucketsAsync()
     {
-        const string cacheKey = "s3_buckets";
+        var cacheKey = S3CacheKey;
 
         var cachedResult = await _cacheService.GetAsync<OperationResult<IReadOnlyList<S3BucketInfo>>>(cacheKey);
         if (cachedResult != null)
@@ -216,7 +227,11 @@ public class LocalStackService : ILocalStackService
 
     public async Task<OperationResult<IReadOnlyList<SqsQueueInfo>>> GetSqsQueuesAsync()
     {
-        const string cacheKey = "sqs_queues";
+        var cacheKey = SqsCacheKey;
+
+        var cachedResult = await _cacheService.GetAsync<OperationResult<IReadOnlyList<SqsQueueInfo>>>(cacheKey);
+        if (cachedResult != null)
+            return cachedResult;
 
         await _sqsSemaphore.WaitAsync();
         try
@@ -236,7 +251,11 @@ public class LocalStackService : ILocalStackService
 
     public async Task<OperationResult<IReadOnlyList<SnsTopicInfo>>> GetSnsTopicsAsync()
     {
-        const string cacheKey = "sns_topics";
+        var cacheKey = SnsCacheKey;
+
+        var cachedResult = await _cacheService.GetAsync<OperationResult<IReadOnlyList<SnsTopicInfo>>>(cacheKey);
+        if (cachedResult != null)
+            return cachedResult;
 
         await _snsSemaphore.WaitAsync();
         try
@@ -262,7 +281,7 @@ public class LocalStackService : ILocalStackService
 
     public async Task<OperationResult<IReadOnlyList<SecretInfo>>> GetSecretsAsync()
     {
-        const string cacheKey = "secrets_manager";
+        var cacheKey = SecretsCacheKey;
 
         var cachedResult = await _cacheService.GetAsync<OperationResult<IReadOnlyList<SecretInfo>>>(cacheKey);
         if (cachedResult != null)
@@ -417,6 +436,34 @@ public class LocalStackService : ILocalStackService
             await InvalidateSnsCacheAsync();
         }
         return result;
+    }
+
+    public Task<OperationResult<string>> GetSqsQueueArnAsync(string queueUrl) =>
+        _sqsService.GetQueueArnAsync(queueUrl);
+
+    public async Task<OperationResult<string>> SubscribeQueueToSnsTopicAsync(string queueUrl, string topicArn)
+    {
+        var arnResult = await _sqsService.GetQueueArnAsync(queueUrl);
+        if (!arnResult.IsSuccess || string.IsNullOrWhiteSpace(arnResult.Data))
+        {
+            return new OperationResult<string>(false, null, arnResult.ErrorMessage ?? "Falha ao obter ARN da fila");
+        }
+
+        var subscribeResult = await _snsService.SubscribeAsync(topicArn, "sqs", arnResult.Data);
+        if (!subscribeResult.IsSuccess)
+            return subscribeResult;
+
+        if (_config.UseLocalStack)
+        {
+            var policyResult = await _sqsService.EnsureQueuePolicyAllowsSnsAsync(queueUrl, arnResult.Data, topicArn);
+            if (!policyResult.IsSuccess)
+            {
+                _logger.LogWarning("Assinatura SNS criada, mas política da fila não foi aplicada: {Message}", policyResult.ErrorMessage);
+            }
+        }
+
+        await InvalidateSnsCacheAsync();
+        return subscribeResult;
     }
 
     public async Task<OperationResult<bool>> DeleteSnsTopicAsync(string topicArn)

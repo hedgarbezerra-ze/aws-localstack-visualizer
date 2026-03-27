@@ -1,6 +1,7 @@
 using Amazon.SecretsManager;
 using Amazon.SecretsManager.Model;
 using AwsLocalStackVisualizer.Abstractions;
+using AwsLocalStackVisualizer.Configuration;
 using AwsLocalStackVisualizer.Models.Common;
 using AwsLocalStackVisualizer.Models.SecretsManager;
 using System.Runtime.CompilerServices;
@@ -9,13 +10,13 @@ namespace AwsLocalStackVisualizer.Services.AWS;
 
 public class SecretsManagerService : ISecretsManagerService
 {
-    private readonly AmazonSecretsManagerClient _secretsManagerClient;
+    private readonly IAppAwsClients _awsClients;
     private readonly ILogger<SecretsManagerService> _logger;
     private readonly INotificationService _notificationService;
 
-    public SecretsManagerService(AmazonSecretsManagerClient secretsManagerClient, ILogger<SecretsManagerService> logger, INotificationService notificationService)
+    public SecretsManagerService(IAppAwsClients awsClients, ILogger<SecretsManagerService> logger, INotificationService notificationService)
     {
-        _secretsManagerClient = secretsManagerClient ?? throw new ArgumentNullException(nameof(secretsManagerClient));
+        _awsClients = awsClients ?? throw new ArgumentNullException(nameof(awsClients));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
     }
@@ -24,7 +25,7 @@ public class SecretsManagerService : ISecretsManagerService
     {
         try
         {
-            var response = await _secretsManagerClient.ListSecretsAsync(new ListSecretsRequest());
+            var response = await _awsClients.SecretsManager.ListSecretsAsync(new ListSecretsRequest());
             
             if (response is not { SecretList: { } secretsList })
             {
@@ -85,7 +86,7 @@ public class SecretsManagerService : ISecretsManagerService
         List<Task<SecretInfo?>> validSecrets;
         try
         {
-            var response = await _secretsManagerClient.ListSecretsAsync(new ListSecretsRequest());
+            var response = await _awsClients.SecretsManager.ListSecretsAsync(new ListSecretsRequest());
             
             if (response is not { SecretList: { } secretsList })
             {
@@ -182,7 +183,7 @@ public class SecretsManagerService : ISecretsManagerService
             if (secretInfo == null)
                 return new OperationResult<SecretDetails>(false, null, $"Secret '{secretName}' não encontrado");
 
-            var versionsResponse = await _secretsManagerClient.ListSecretVersionIdsAsync(new ListSecretVersionIdsRequest
+            var versionsResponse = await _awsClients.SecretsManager.ListSecretVersionIdsAsync(new ListSecretVersionIdsRequest
             {
                 SecretId = secretName
             });
@@ -221,7 +222,7 @@ public class SecretsManagerService : ISecretsManagerService
             if (!string.IsNullOrEmpty(versionId))
                 request.VersionId = versionId;
 
-            var response = await _secretsManagerClient.GetSecretValueAsync(request);
+            var response = await _awsClients.SecretsManager.GetSecretValueAsync(request);
             
             if (response is null)
             {
@@ -257,7 +258,7 @@ public class SecretsManagerService : ISecretsManagerService
                 Description = description
             };
 
-            var response = await _secretsManagerClient.CreateSecretAsync(request);
+            var response = await _awsClients.SecretsManager.CreateSecretAsync(request);
             _notificationService.ShowSuccess($"Secret '{name}' criado com sucesso");
             return new OperationResult<string>(true, response.ARN);
         }
@@ -278,7 +279,7 @@ public class SecretsManagerService : ISecretsManagerService
                 SecretString = secretValue
             };
 
-            await _secretsManagerClient.UpdateSecretAsync(request);
+            await _awsClients.SecretsManager.UpdateSecretAsync(request);
             _notificationService.ShowSuccess($"Secret '{name}' atualizado com sucesso");
             return new OperationResult<bool>(true, true);
         }
@@ -299,7 +300,7 @@ public class SecretsManagerService : ISecretsManagerService
                 ForceDeleteWithoutRecovery = forceDelete
             };
 
-            await _secretsManagerClient.DeleteSecretAsync(request);
+            await _awsClients.SecretsManager.DeleteSecretAsync(request);
             var message = forceDelete 
                 ? $"Secret '{name}' excluído permanentemente" 
                 : $"Secret '{name}' marcado para exclusão";

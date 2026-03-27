@@ -1,0 +1,31 @@
+@inject AwsRegionContext RegionContext
+@inject INotificationService NotificationService
+@rendermode InteractiveServer
+
+<div class="px-3 py-2 border-bottom border-secondary border-opacity-25">
+    <label class="form-label text-white-50 small mb-1" for="aws-region-select">Região AWS</label>
+    <select id="aws-region-select"
+            class="form-select form-select-sm bg-dark text-white border-secondary"
+            value="@RegionContext.Region"
+            @onchange="OnRegionChanged">
+        @foreach (var r in AwsRegionsCatalog.All)
+        {
+            <option value="@r">@r</option>
+        }
+    </select>
+</div>
+
+@code {
+    private void OnRegionChanged(ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(value))
+            return;
+
+        if (!RegionContext.SetRegion(value))
+            return;
+
+        NotificationService.ShowInfo($"Região: {value}");
+        StateHasChanged();
+    }
+}

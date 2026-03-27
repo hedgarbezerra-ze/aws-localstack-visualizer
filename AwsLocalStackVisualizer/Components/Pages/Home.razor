@@ -1,4 +1,4 @@
-﻿@page "/"
+@page "/"
 @using AwsLocalStackVisualizer.Abstractions
 @using AwsLocalStackVisualizer.Models.Dashboard
 @using AwsLocalStackVisualizer.Models.S3
@@ -6,8 +6,11 @@
 @using AwsLocalStackVisualizer.Models.SNS
 @using AwsLocalStackVisualizer.Models.SecretsManager
 @using AwsLocalStackVisualizer.Services
+@using AwsLocalStackVisualizer.Configuration
 @inject ILocalStackService LocalStackService
 @inject IJSRuntime JSRuntime
+@inject AwsRegionContext RegionContext
+@implements IDisposable
 @rendermode InteractiveServer
 
 <PageTitle>LocalStack Visualizer</PageTitle>
@@ -288,9 +291,28 @@
     
     private DateTime lastUpdated = DateTime.Now;
 
+    protected override void OnInitialized()
+    {
+        RegionContext.RegionChanged += OnRegionChangedRefreshContent;
+    }
+
     protected override async Task OnInitializedAsync()
     {
         await LoadAllServicesDataAsync();
+    }
+
+    private void OnRegionChangedRefreshContent()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            await LoadAllServicesDataAsync();
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        RegionContext.RegionChanged -= OnRegionChangedRefreshContent;
     }
 
     private async Task LoadAllServicesDataAsync()

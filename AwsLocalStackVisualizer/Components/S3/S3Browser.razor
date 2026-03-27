@@ -4,12 +4,15 @@
 @using AwsLocalStackVisualizer.Models.S3
 @using AwsLocalStackVisualizer.Models.Common
 @using AwsLocalStackVisualizer.Services
+@using AwsLocalStackVisualizer.Configuration
 @using AwsLocalStackVisualizer.Validators
 @using Microsoft.AspNetCore.Components.Forms
 @inject ILocalStackService LocalStackService
 @inject IReadOnlyService ReadOnlyService
 @inject IJSRuntime JSRuntime
 @inject NavigationManager Navigation
+@inject AwsRegionContext RegionContext
+@implements IDisposable
 @rendermode InteractiveServer
 
 <PageTitle>S3 Browser - LocalStack Visualizer</PageTitle>
@@ -506,6 +509,11 @@
     private bool isDeletingObject = false;
     private bool forceDeleteBucket = false;
 
+    protected override void OnInitialized()
+    {
+        RegionContext.RegionChanged += OnRegionChangedRefreshContent;
+    }
+
     protected override async Task OnInitializedAsync()
     {
         await LoadData();
@@ -514,6 +522,20 @@
     protected override async Task OnParametersSetAsync()
     {
         await LoadData();
+    }
+
+    private void OnRegionChangedRefreshContent()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            await LoadData();
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        RegionContext.RegionChanged -= OnRegionChangedRefreshContent;
     }
 
     private async Task LoadData()

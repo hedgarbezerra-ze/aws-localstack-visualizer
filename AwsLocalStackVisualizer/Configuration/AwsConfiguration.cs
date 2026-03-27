@@ -10,7 +10,6 @@ public enum AwsCredentialType
 public record AwsConfiguration
 {
     public bool UseLocalStack { get; init; } = true;
-    public string Region { get; init; } = "us-west-2";
     public string? ServiceUrl { get; init; } = null;
     public AwsCredentials Credentials { get; init; } = new();
 }

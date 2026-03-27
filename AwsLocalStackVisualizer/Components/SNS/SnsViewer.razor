@@ -3,10 +3,13 @@
 @using AwsLocalStackVisualizer.Abstractions
 @using AwsLocalStackVisualizer.Models.SNS
 @using AwsLocalStackVisualizer.Services
+@using AwsLocalStackVisualizer.Configuration
 @inject ILocalStackService LocalStackService
 @inject IReadOnlyService ReadOnlyService
 @inject IJSRuntime JSRuntime
 @inject NavigationManager Navigation
+@inject AwsRegionContext RegionContext
+@implements IDisposable
 @rendermode InteractiveServer
 
 <PageTitle>SNS Viewer - LocalStack Visualizer</PageTitle>
@@ -190,246 +193,286 @@
     {
         @if (topicDetails != null)
         {
+            var subCount = topicDetails.Subscriptions.Count;
+            var msgCount = topicDetails.Messages.Count;
+            var regionLabel = GetRegionFromTopicArn(topicDetails.TopicInfo.Arn);
+
             <div class="row mb-4">
                 <div class="col-12">
-                    <div class="card">
-                        <div class="card-body">
-                            <div class="d-flex justify-content-between align-items-center">
-                                <h5 class="card-title mb-0">
-                                    <i class="bi bi-broadcast text-warning"></i>
-                                    @topicDetails.TopicInfo.Name
-                                </h5>
-                                <button class="btn btn-outline-danger" @onclick="() => ShowDeleteTopicModal(topicDetails.TopicInfo.Arn, topicDetails.TopicInfo.Name)" disabled="@ReadOnlyService.IsReadOnly">
-                                    <i class="bi bi-trash"></i> Excluir Tópico
-                                </button>
-                            </div>
-                            <div class="row mb-3">
-                                <div class="col-md-3">
-                                    <strong>Assinaturas:</strong>
-                                    <span class="badge bg-primary">@topicDetails.TopicInfo.SubscriptionsCount</span>
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-body p-4">
+                            <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+                                <div>
+                                    <div class="text-uppercase text-muted small fw-semibold mb-1">Tópico</div>
+                                    <h2 class="h4 mb-0 d-flex align-items-center gap-2">
+                                        <span class="rounded-circle bg-warning bg-opacity-25 p-2 d-inline-flex align-items-center justify-content-center">
+                                            <i class="bi bi-broadcast text-warning"></i>
+                                        </span>
+                                        @topicDetails.TopicInfo.Name
+                                    </h2>
+                                    <div class="mt-2">
+                                        @if (!string.IsNullOrEmpty(regionLabel))
+                                        {
+                                            <span class="badge rounded-pill bg-secondary bg-opacity-10 text-secondary border border-secondary border-opacity-25">
+                                                <i class="bi bi-geo-alt"></i> @regionLabel
+                                            </span>
+                                        }
+                                        <span class="badge rounded-pill bg-light text-muted border ms-1">
+                                            <i class="bi bi-clock"></i> @topicDetails.TopicInfo.CreatedDate.ToString("dd/MM/yyyy HH:mm")
+                                        </span>
+                                    </div>
                                 </div>
-                                <div class="col-md-3">
-                                    <strong>Mensagens:</strong>
-                                    <span class="badge bg-info">@topicDetails.MessageCount</span>
-                                </div>
-                                <div class="col-md-6">
-                                    <strong>Criado em:</strong> @topicDetails.TopicInfo.CreatedDate.ToString("dd/MM/yyyy HH:mm:ss")
+                                <div class="d-flex flex-wrap gap-2">
+                                    <button type="button" class="btn btn-outline-primary" @onclick="RefreshData">
+                                        <i class="bi bi-arrow-clockwise"></i> Atualizar detalhes
+                                    </button>
+                                    <button class="btn btn-outline-danger" @onclick="() => ShowDeleteTopicModal(topicDetails.TopicInfo.Arn, topicDetails.TopicInfo.Name)" disabled="@ReadOnlyService.IsReadOnly">
+                                        <i class="bi bi-trash"></i> Excluir
+                                    </button>
                                 </div>
                             </div>
-                            <div class="mb-2">
-                                <strong>ARN do Tópico:</strong>
-                                <br>
-                                <code>@topicDetails.TopicInfo.Arn</code>
+
+                            <div class="row g-3 mb-4">
+                                <div class="col-6 col-md-3">
+                                    <div class="rounded-3 border bg-primary bg-opacity-10 p-3 h-100">
+                                        <div class="small text-primary text-opacity-75 fw-semibold">Assinaturas</div>
+                                        <div class="fs-3 fw-bold text-primary">@subCount</div>
+                                    </div>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <div class="rounded-3 border bg-info bg-opacity-10 p-3 h-100">
+                                        <div class="small text-info text-opacity-75 fw-semibold">Mensagens (LocalStack)</div>
+                                        <div class="fs-3 fw-bold text-info">@msgCount</div>
+                                    </div>
+                                </div>
+                                <div class="col-12 col-md-6">
+                                    <div class="rounded-3 border p-3 h-100 bg-light">
+                                        <div class="small text-muted fw-semibold mb-1">ARN</div>
+                                        <code class="small text-break user-select-all d-block">@topicDetails.TopicInfo.Arn</code>
+                                    </div>
+                                </div>
                             </div>
+
+                            <ul class="nav nav-pills nav-fill gap-2 gap-md-0 flex-column flex-md-row mb-0" role="tablist">
+                                <li class="nav-item" role="presentation">
+                                    <button type="button" class="nav-link @(topicDetailsTab == "subscriptions" ? "active" : "") py-3"
+                                            @onclick='() => SetTopicDetailsTab("subscriptions")'>
+                                        <i class="bi bi-link-45deg me-1"></i> Assinaturas
+                                        <span class="badge bg-secondary ms-1">@subCount</span>
+                                    </button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button type="button" class="nav-link @(topicDetailsTab == "messages" ? "active" : "") py-3"
+                                            @onclick='() => SetTopicDetailsTab("messages")'>
+                                        <i class="bi bi-envelope-paper me-1"></i> Mensagens publicadas
+                                        <span class="badge bg-secondary ms-1">@msgCount</span>
+                                    </button>
+                                </li>
+                            </ul>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <div class="row">
-                <div class="col-12">
-                    <h4>Assinaturas do Tópico</h4>
-                    @if (topicDetails.Subscriptions.Any())
-                    {
-                        <div class="table-responsive">
-                            <table class="table table-striped">
-                                <thead>
-                                    <tr>
-                                        <th>Protocolo</th>
-                                        <th>Endpoint</th>
-                                        <th>Status</th>
-                                        <th>Proprietário</th>
-                                        <th>ARN da Assinatura</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @foreach (var subscription in topicDetails.Subscriptions)
-                                    {
+            @if (topicDetailsTab == "subscriptions")
+            {
+                <div class="row">
+                    <div class="col-12">
+                        @if (topicDetails.Subscriptions.Any())
+                        {
+                            <div class="table-responsive card border-0 shadow-sm">
+                                <table class="table table-hover table-striped mb-0 align-middle">
+                                    <thead class="table-light">
                                         <tr>
-                                            <td>
-                                                <span class="badge @GetProtocolBadgeClass(subscription.Protocol)">
-                                                    <i class="@GetProtocolIcon(subscription.Protocol)"></i>
-                                                    @subscription.Protocol.ToUpper()
-                                                </span>
-                                            </td>
-                                            <td>
-                                                <code class="small">@subscription.Endpoint</code>
-                                            </td>
-                                            <td>
-                                                @if (subscription.ConfirmationWasAuthenticated)
-                                                {
-                                                    <span class="badge bg-success">
-                                                        <i class="bi bi-check-circle"></i> Confirmada
-                                                    </span>
-                                                }
-                                                else
-                                                {
-                                                    <span class="badge bg-warning">
-                                                        <i class="bi bi-clock"></i> Pendente
-                                                    </span>
-                                                }
-                                            </td>
-                                            <td>@subscription.Owner</td>
-                                            <td>
-                                                @if (!string.IsNullOrEmpty(subscription.SubscriptionArn) &&
-                                                     subscription.SubscriptionArn != "PendingConfirmation")
-                                                {
-                                                    <code class="small">@subscription.SubscriptionArn</code>
-                                                }
-                                                else
-                                                {
-                                                    <span class="text-muted">Pendente de confirmação</span>
-                                                }
-                                            </td>
+                                            <th scope="col" style="width:8rem">Protocolo</th>
+                                            <th scope="col">Endpoint</th>
+                                            <th scope="col" style="width:9rem">Status</th>
+                                            <th scope="col" style="width:8rem">Conta</th>
+                                            <th scope="col">ARN da assinatura</th>
                                         </tr>
-                                    }
-                                </tbody>
-                            </table>
-                        </div>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var subscription in topicDetails.Subscriptions)
+                                        {
+                                            <tr>
+                                                <td>
+                                                    <span class="badge @GetProtocolBadgeClass(subscription.Protocol) text-wrap">
+                                                        <i class="@GetProtocolIcon(subscription.Protocol)"></i>
+                                                        @subscription.Protocol.ToUpperInvariant()
+                                                    </span>
+                                                </td>
+                                                <td><code class="small text-break d-inline-block" style="max-width:22rem">@subscription.Endpoint</code></td>
+                                                <td>
+                                                    @if (subscription.ConfirmationWasAuthenticated)
+                                                    {
+                                                        <span class="badge bg-success">
+                                                            <i class="bi bi-check-circle"></i> Confirmada
+                                                        </span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="badge bg-warning text-dark">
+                                                            <i class="bi bi-hourglass-split"></i> Pendente
+                                                        </span>
+                                                    }
+                                                </td>
+                                                <td><span class="small text-muted">@subscription.Owner</span></td>
+                                                <td>
+                                                    @if (!string.IsNullOrEmpty(subscription.SubscriptionArn) &&
+                                                         subscription.SubscriptionArn != "PendingConfirmation")
+                                                    {
+                                                        <code class="small text-break d-inline-block" style="max-width:24rem">@subscription.SubscriptionArn</code>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="text-muted small">Aguardando confirmação</span>
+                                                    }
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
 
-                        <div class="mt-4">
-                            <h5>Estatísticas das Assinaturas</h5>
-                            <div class="row">
+                            <div class="row g-3 mt-3">
                                 @{
                                     var groupedSubscriptions = topicDetails.Subscriptions
                                         .GroupBy(s => s.Protocol)
-                                        .ToDictionary(g => g.Key, g => g.Count());
-
+                                        .OrderByDescending(g => g.Count())
+                                        .ToList();
                                     var confirmedCount = topicDetails.Subscriptions.Count(s => s.ConfirmationWasAuthenticated);
                                     var pendingCount = topicDetails.Subscriptions.Count(s => !s.ConfirmationWasAuthenticated);
                                 }
-
-                                <div class="col-md-3 mb-3">
-                                    <div class="card text-center">
-                                        <div class="card-body">
-                                            <h5 class="text-success">@confirmedCount</h5>
+                                <div class="col-6 col-md-3">
+                                    <div class="card border-0 bg-success bg-opacity-10 h-100">
+                                        <div class="card-body text-center py-3">
+                                            <div class="fs-4 fw-bold text-success">@confirmedCount</div>
                                             <small class="text-muted">Confirmadas</small>
                                         </div>
                                     </div>
                                 </div>
-                                <div class="col-md-3 mb-3">
-                                    <div class="card text-center">
-                                        <div class="card-body">
-                                            <h5 class="text-warning">@pendingCount</h5>
+                                <div class="col-6 col-md-3">
+                                    <div class="card border-0 bg-warning bg-opacity-10 h-100">
+                                        <div class="card-body text-center py-3">
+                                            <div class="fs-4 fw-bold text-warning text-dark">@pendingCount</div>
                                             <small class="text-muted">Pendentes</small>
                                         </div>
                                     </div>
                                 </div>
-
-                                @foreach (var protocolGroup in groupedSubscriptions)
+                                @foreach (var g in groupedSubscriptions.Take(4))
                                 {
-                                    <div class="col-md-3 mb-3">
-                                        <div class="card text-center">
-                                            <div class="card-body">
-                                                <h5 class="text-primary">@protocolGroup.Value</h5>
-                                                <small class="text-muted">@protocolGroup.Key.ToUpper()</small>
+                                    <div class="col-6 col-md-3">
+                                        <div class="card border-0 bg-light h-100">
+                                            <div class="card-body text-center py-3">
+                                                <div class="fs-4 fw-bold text-primary">@g.Count()</div>
+                                                <small class="text-muted text-uppercase">@g.Key</small>
                                             </div>
                                         </div>
                                     </div>
                                 }
                             </div>
-                        </div>
-                    }
-                    else
-                    {
-                        <div class="alert alert-info" role="alert">
-                            <h4 class="alert-heading">Nenhuma assinatura encontrada</h4>
-                            <p>Este tópico não possui assinaturas configuradas.</p>
-                            <small class="text-muted">
-                                Assinaturas podem ser criadas através do AWS CLI ou SDKs.
-                            </small>
-                        </div>
-                    }
-                </div>
-            </div>
-
-            <div class="row mt-4">
-                <div class="col-12">
-                    <h4>Mensagens Publicadas</h4>
-                    @if (topicDetails.Messages.Any())
-                    {
-                        <div class="alert alert-info" role="alert">
-                            <i class="bi bi-info-circle"></i>
-                            <strong>Informação:</strong> Estas são as mensagens publicadas neste tópico (disponível apenas no LocalStack).
-                        </div>
-
-                        @foreach (var message in topicDetails.Messages)
+                        }
+                        else
                         {
-                            <div class="card mb-3">
-                                <div class="card-header">
-                                    <div class="row align-items-center">
-                                        <div class="col-md-8">
-                                            <h6 class="mb-0">
-                                                <i class="bi bi-envelope-fill text-warning"></i>
-                                                @if (!string.IsNullOrEmpty(message.Subject))
-                                                {
-                                                    @message.Subject
-                                                }
-                                                else
-                                                {
-                                                    <span class="text-muted">Mensagem: @message.MessageId[..Math.Min(8, message.MessageId.Length)]...</span>
-                                                }
-                                            </h6>
-                                        </div>
-                                        <div class="col-md-4 text-end">
-                                            <small class="text-muted">
-                                                @message.Timestamp.ToString("dd/MM/yyyy HH:mm:ss")
-                                            </small>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="card-body">
-                                    <div class="row mb-2">
-                                        <div class="col-12">
-                                            <strong>Message ID:</strong>
-                                            <code class="small">@message.MessageId</code>
-                                        </div>
-                                    </div>
-
-                                    <h6>Conteúdo da Mensagem:</h6>
-                                    <div class="bg-light p-3 rounded">
-                                        <pre class="mb-0" style="white-space: pre-wrap; word-break: break-word;">@FormatMessageBody(message.Message)</pre>
-                                    </div>
-
-                                    @if (message.MessageAttributes.Any())
-                                    {
-                                        <h6 class="mt-3">Atributos:</h6>
-                                        <div class="table-responsive">
-                                            <table class="table table-sm">
-                                                <thead>
-                                                    <tr>
-                                                        <th>Atributo</th>
-                                                        <th>Valor</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    @foreach (var attr in message.MessageAttributes)
-                                                    {
-                                                        <tr>
-                                                            <td><code>@attr.Key</code></td>
-                                                            <td>@attr.Value</td>
-                                                        </tr>
-                                                    }
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    }
+                            <div class="card border-0 shadow-sm">
+                                <div class="card-body text-center py-5">
+                                    <i class="bi bi-link-45deg display-4 text-muted opacity-50"></i>
+                                    <h5 class="mt-3">Nenhuma assinatura</h5>
+                                    <p class="text-muted mb-0 small">Use a fila SQS ou a CLI para associar destinos a este tópico.</p>
                                 </div>
                             </div>
                         }
-                    }
-                    else
-                    {
-                        <div class="alert alert-info" role="alert">
-                            <h4 class="alert-heading">Nenhuma mensagem disponível</h4>
-                            <p>Este tópico não possui mensagens publicadas ou o recurso de visualização de mensagens não está disponível.</p>
-                            <small class="text-muted">
-                                As mensagens são disponibilizadas apenas no LocalStack através da API interna.
-                            </small>
-                        </div>
-                    }
+                    </div>
                 </div>
-            </div>
+            }
+            else
+            {
+                <div class="row">
+                    <div class="col-12">
+                        @if (topicDetails.Messages.Any())
+                        {
+                            <div class="alert alert-light border small mb-4">
+                                <i class="bi bi-lightbulb text-warning"></i>
+                                Histórico de publicações exposto pelo LocalStack (<code class="small">/_aws/sns/messages</code>). Na AWS real o SNS não armazena fila de mensagens do tópico.
+                            </div>
+
+                            <div class="vstack gap-2">
+                                @for (var i = 0; i < topicDetails.Messages.Count; i++)
+                                {
+                                    var message = topicDetails.Messages[i];
+                                    var expanded = _expandedMessageIndex == i;
+                                    var title = !string.IsNullOrEmpty(message.Subject)
+                                        ? message.Subject
+                                        : $"Mensagem {ShortMessageId(message.MessageId)}";
+                                    <div class="card border-0 shadow-sm overflow-hidden">
+                                        <div class="card-header bg-white d-flex flex-wrap align-items-center justify-content-between gap-2 py-3 @(expanded ? "border-bottom" : "")"
+                                             style="cursor: pointer;"
+                                             @onclick="() => ToggleMessageDetail(i)">
+                                            <div class="d-flex align-items-center gap-2 min-w-0">
+                                                <span class="badge bg-dark">#@(i + 1)</span>
+                                                <span class="fw-semibold text-truncate" title="@title">@title</span>
+                                            </div>
+                                            <div class="d-flex align-items-center gap-2 small text-muted flex-shrink-0">
+                                                <span>@message.Timestamp.ToString("dd/MM/yyyy HH:mm:ss")</span>
+                                                <i class="bi @(expanded ? "bi-chevron-up" : "bi-chevron-down")"></i>
+                                            </div>
+                                        </div>
+                                        @if (expanded)
+                                        {
+                                            <div class="card-body pt-3">
+                                                <dl class="row small mb-3">
+                                                    <dt class="col-sm-2 text-muted">Message ID</dt>
+                                                    <dd class="col-sm-10"><code class="text-break user-select-all">@message.MessageId</code></dd>
+                                                </dl>
+                                                <div class="fw-semibold small text-muted mb-2">Corpo</div>
+                                                <div class="rounded-3 border bg-light p-3">
+                                                    <pre class="mb-0 small" style="white-space: pre-wrap; word-break: break-word; max-height: 20rem; overflow-y: auto;">@FormatMessageBody(message.Message)</pre>
+                                                </div>
+                                                @if (message.MessageAttributes.Any())
+                                                {
+                                                    <div class="fw-semibold small text-muted mt-3 mb-2">Atributos</div>
+                                                    <div class="table-responsive rounded-3 border">
+                                                        <table class="table table-sm table-striped mb-0">
+                                                            <thead class="table-light">
+                                                                <tr>
+                                                                    <th>Nome</th>
+                                                                    <th>Valor</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                @foreach (var attr in message.MessageAttributes)
+                                                                {
+                                                                    <tr>
+                                                                        <td class="text-nowrap"><code>@attr.Key</code></td>
+                                                                        <td class="text-break">@attr.Value</td>
+                                                                    </tr>
+                                                                }
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="card border-0 shadow-sm">
+                                <div class="card-body text-center py-5">
+                                    <i class="bi bi-envelope-open display-4 text-muted opacity-50"></i>
+                                    <h5 class="mt-3">Nenhuma mensagem listada</h5>
+                                    <p class="text-muted small mb-3">Publique pelo botão acima ou aguarde o LocalStack expor o histórico interno.</p>
+                                    <button type="button" class="btn btn-outline-primary btn-sm" @onclick="RefreshData">
+                                        <i class="bi bi-arrow-clockwise"></i> Tentar carregar de novo
+                                    </button>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
         }
     }
 </div>
@@ -594,6 +637,15 @@
     private string selectedTopicArn = string.Empty;
     private string selectedTopicName = string.Empty;
 
+    private string topicDetailsTab = "subscriptions";
+
+    private int? _expandedMessageIndex;
+
+    protected override void OnInitialized()
+    {
+        RegionContext.RegionChanged += OnRegionChangedRefreshContent;
+    }
+
     protected override async Task OnInitializedAsync()
     {
         await LoadData();
@@ -602,6 +654,20 @@
     protected override async Task OnParametersSetAsync()
     {
         await LoadData();
+    }
+
+    private void OnRegionChangedRefreshContent()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            await LoadData();
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        RegionContext.RegionChanged -= OnRegionChangedRefreshContent;
     }
 
     private async Task LoadData()
@@ -621,9 +687,14 @@
             }
             else
             {
+                topicDetailsTab = "subscriptions";
                 var result = await LocalStackService.GetSnsTopicDetailsAsync(TopicArn);
                 topicDetails = result.IsSuccess ? result.Data : null;
                 topics.Clear();
+                if (topicDetails?.Messages.Count > 0)
+                    _expandedMessageIndex = 0;
+                else
+                    _expandedMessageIndex = null;
             }
         }
         catch (Exception)
@@ -651,6 +722,33 @@
     private string GetTopicName(string topicArn)
     {
         return topicArn.Split(':').LastOrDefault() ?? topicArn;
+    }
+
+    private static string GetRegionFromTopicArn(string? arn)
+    {
+        if (string.IsNullOrEmpty(arn))
+            return string.Empty;
+        var parts = arn.Split(':', StringSplitOptions.None);
+        return parts.Length >= 4 ? parts[3] : string.Empty;
+    }
+
+    private static string ShortMessageId(string? messageId)
+    {
+        if (string.IsNullOrEmpty(messageId))
+            return "—";
+        return messageId.Length <= 12 ? messageId : messageId[..8] + "…";
+    }
+
+    private void SetTopicDetailsTab(string tab)
+    {
+        topicDetailsTab = tab;
+        StateHasChanged();
+    }
+
+    private void ToggleMessageDetail(int index)
+    {
+        _expandedMessageIndex = _expandedMessageIndex == index ? null : index;
+        StateHasChanged();
     }
 
     private string GetProtocolBadgeClass(string protocol)

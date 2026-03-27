@@ -4,30 +4,29 @@ using AwsLocalStackVisualizer.Abstractions;
 using AwsLocalStackVisualizer.Configuration;
 using AwsLocalStackVisualizer.Models.Common;
 using AwsLocalStackVisualizer.Models.S3;
-using Microsoft.Extensions.Options;
 
 namespace AwsLocalStackVisualizer.Services.AWS;
 
 public class S3Service : IS3Service
 {
-    private readonly AmazonS3Client _s3Client;
+    private readonly IAppAwsClients _awsClients;
     private readonly ILogger<S3Service> _logger;
     private readonly INotificationService _notificationService;
-    private readonly AwsConfiguration _configuration;
+    private readonly AwsRegionContext _regionContext;
 
-    public S3Service(AmazonS3Client s3Client, ILogger<S3Service> logger, INotificationService notificationService, IOptions<AwsConfiguration> configuration)
+    public S3Service(IAppAwsClients awsClients, ILogger<S3Service> logger, INotificationService notificationService, AwsRegionContext regionContext)
     {
-        _s3Client = s3Client ?? throw new ArgumentNullException(nameof(s3Client));
+        _awsClients = awsClients ?? throw new ArgumentNullException(nameof(awsClients));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
-        _configuration = configuration?.Value ?? throw new ArgumentNullException(nameof(configuration));
+        _regionContext = regionContext ?? throw new ArgumentNullException(nameof(regionContext));
     }
 
     public async Task<OperationResult<bool>> TestConnectionAsync()
     {
         try
         {
-            await _s3Client.ListBucketsAsync();
+            await _awsClients.S3.ListBucketsAsync();
             return new OperationResult<bool>(true, true);
         }
         catch (Exception ex)
@@ -41,7 +40,7 @@ public class S3Service : IS3Service
     {
         try
         {
-            var response = await _s3Client.ListBucketsAsync();
+            var response = await _awsClients.S3.ListBucketsAsync();
             
             if (response is not { Buckets: { } bucketsList })
             {
@@ -103,7 +102,7 @@ public class S3Service : IS3Service
     {
         try
         {
-            var response = await _s3Client.ListBucketsAsync();
+            var response = await _awsClients.S3.ListBucketsAsync();
             return response is { Buckets: { } bucketsList } ? bucketsList : null;
         }
         catch (Exception ex)
@@ -142,7 +141,7 @@ public class S3Service : IS3Service
                 return new OperationResult<S3BucketDetails>(true, new S3BucketDetails(defaultBucket, []));
             }
 
-            var response = await _s3Client.ListObjectsV2Async(new ListObjectsV2Request
+            var response = await _awsClients.S3.ListObjectsV2Async(new ListObjectsV2Request
             {
                 BucketName = bucketName
             });
@@ -183,7 +182,7 @@ public class S3Service : IS3Service
     {
         try
         {
-            var response = await _s3Client.GetObjectAsync(bucketName, objectKey);
+            var response = await _awsClients.S3.GetObjectAsync(bucketName, objectKey);
             
             if (response is not { ResponseStream: { } })
             {
@@ -206,7 +205,7 @@ public class S3Service : IS3Service
     {
         try
         {
-            var response = await _s3Client.ListObjectsV2Async(new ListObjectsV2Request
+            var response = await _awsClients.S3.ListObjectsV2Async(new ListObjectsV2Request
             {
                 BucketName = bucketName
             });
@@ -228,7 +227,7 @@ public class S3Service : IS3Service
     {
         try
         {
-            var response = await _s3Client.ListObjectsV2Async(new ListObjectsV2Request
+            var response = await _awsClients.S3.ListObjectsV2Async(new ListObjectsV2Request
             {
                 BucketName = bucketName
             });
@@ -244,7 +243,7 @@ public class S3Service : IS3Service
     {
         try
         {
-            var response = await _s3Client.ListObjectsV2Async(new ListObjectsV2Request
+            var response = await _awsClients.S3.ListObjectsV2Async(new ListObjectsV2Request
             {
                 BucketName = bucketName
             });
@@ -268,11 +267,11 @@ public class S3Service : IS3Service
                 UseClientRegion = true,
                 PutBucketConfiguration = new PutBucketConfiguration
                 {
-                    LocationConstraint = BucketLocationConstraint.FindValue(_configuration.Region)
+                    LocationConstraint = BucketLocationConstraint.FindValue(_regionContext.Region)
                 }
             };
             
-            var response = await _s3Client.PutBucketAsync(bucktRequest);
+            var response = await _awsClients.S3.PutBucketAsync(bucktRequest);
             
             if (response is null)
             {
@@ -313,7 +312,7 @@ public class S3Service : IS3Service
                 ContentType = contentType ?? "text/plain"
             };
             
-            await _s3Client.PutObjectAsync(request);
+            await _awsClients.S3.PutObjectAsync(request);
             
             _logger.LogInformation("Objeto {ObjectKey} enviado para bucket {BucketName}", objectKey, bucketName);
             _notificationService.ShowSuccess($"Objeto '{objectKey}' enviado com sucesso!");
@@ -338,7 +337,7 @@ public class S3Service : IS3Service
                 ContentType = contentType
             };
             
-            await _s3Client.PutObjectAsync(request);
+            await _awsClients.S3.PutObjectAsync(request);
             
             _logger.LogInformation("Arquivo {ObjectKey} enviado para bucket {BucketName} ({Size} bytes)", objectKey, bucketName, fileStream.Length);
             _notificationService.ShowSuccess($"Arquivo '{objectKey}' enviado com sucesso!");
@@ -361,7 +360,7 @@ public class S3Service : IS3Service
                 Key = objectKey
             };
 
-            var response = await _s3Client.GetObjectAsync(request);
+            var response = await _awsClients.S3.GetObjectAsync(request);
             
             if (response is not { ResponseStream: { } })
             {
@@ -389,7 +388,7 @@ public class S3Service : IS3Service
         {
             if (force)
             {
-                var objects = await _s3Client.ListObjectsV2Async(new ListObjectsV2Request
+                var objects = await _awsClients.S3.ListObjectsV2Async(new ListObjectsV2Request
                 {
                     BucketName = bucketName
                 });
@@ -401,11 +400,11 @@ public class S3Service : IS3Service
                         BucketName = bucketName,
                         Objects = objects.S3Objects.Select(obj => new KeyVersion { Key = obj.Key }).ToList()
                     };
-                    await _s3Client.DeleteObjectsAsync(deleteRequest);
+                    await _awsClients.S3.DeleteObjectsAsync(deleteRequest);
                 }
             }
 
-            await _s3Client.DeleteBucketAsync(bucketName);
+            await _awsClients.S3.DeleteBucketAsync(bucketName);
             
             _logger.LogInformation("Bucket {BucketName} excluído com sucesso", bucketName);
             _notificationService.ShowSuccess($"Bucket '{bucketName}' excluído com sucesso!");
@@ -422,7 +421,7 @@ public class S3Service : IS3Service
     {
         try
         {
-            await _s3Client.DeleteObjectAsync(bucketName, objectKey);
+            await _awsClients.S3.DeleteObjectAsync(bucketName, objectKey);
             
             _logger.LogInformation("Objeto {ObjectKey} excluído do bucket {BucketName}", objectKey, bucketName);
             _notificationService.ShowSuccess($"Objeto '{objectKey}' excluído com sucesso!");
